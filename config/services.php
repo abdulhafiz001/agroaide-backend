@@ -35,4 +35,15 @@ return [
         ],
     ],
 
+    'openrouter' => [
+        'api_key' => env('OPENROUTER_API_KEY'),
+        'model' => env('OPENROUTER_MODEL', 'deepseek/deepseek-r1-0528:free'),
+        'vision_model' => env('OPENROUTER_VISION_MODEL', 'qwen/qwen3-vl-235b-a22b-thinking'),
+    ],
+
+    'plantnet' => [
+        'api_key' => env('PLANTNET_API_KEY'),
+        'endpoint' => 'https://my-api.plantnet.org/v2',
+    ],
+
 ];

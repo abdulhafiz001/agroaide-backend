@@ -72,4 +72,9 @@ class User extends Authenticatable
     {
         return $this->hasMany(AdvisorConversation::class);
     }
+
+    public function farmImageAnalyses(): HasMany
+    {
+        return $this->hasMany(FarmImageAnalysis::class);
+    }
 }

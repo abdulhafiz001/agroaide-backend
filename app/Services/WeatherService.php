@@ -39,7 +39,7 @@ class WeatherService
 
     private function fetchFromApi(float $latitude, float $longitude): array
     {
-        $response = Http::timeout(15)->get(self::BASE_URL, [
+        $response = Http::timeout(8)->get(self::BASE_URL, [
             'latitude' => $latitude,
             'longitude' => $longitude,
             'current' => implode(',', [

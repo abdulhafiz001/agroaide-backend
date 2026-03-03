@@ -12,12 +12,13 @@ class AiAdvisorService
 {
     private string $apiKey;
     private string $model;
+    private string $fallbackModel = 'meta-llama/llama-3.2-3b-instruct:free';
     private string $endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 
     public function __construct(private WeatherService $weatherService)
     {
-        $this->apiKey = config('services.openrouter.api_key', env('OPENROUTER_API_KEY', ''));
-        $this->model = config('services.openrouter.model', env('OPENROUTER_MODEL', 'deepseek/deepseek-r1-0528:free'));
+        $this->apiKey = trim(config('services.openrouter.api_key') ?? env('OPENROUTER_API_KEY', '') ?? '');
+        $this->model = trim(config('services.openrouter.model') ?? env('OPENROUTER_MODEL', 'deepseek/deepseek-r1-0528:free') ?? '');
     }
 
     /**
@@ -233,11 +234,16 @@ PROMPT;
 
     private function callOpenRouter(array $messages): string
     {
+        if (empty($this->apiKey)) {
+            Log::error('OpenRouter: API key missing. Set OPENROUTER_API_KEY in .env');
+            return 'AI advisor is not configured. Please contact support.';
+        }
+
         try {
-            $response = Http::timeout(60)
+            $response = Http::timeout(45)
                 ->withHeaders([
                     'Authorization' => 'Bearer ' . $this->apiKey,
-                    'HTTP-Referer' => 'https://agroaide.ng',
+                    'HTTP-Referer' => config('app.url', 'https://agroaide.ng'),
                     'X-Title' => 'AgroAide Platform',
                     'Content-Type' => 'application/json',
                 ])
@@ -256,14 +262,40 @@ PROMPT;
                 return trim($content);
             }
 
+            $body = $response->json();
+            $errorMsg = $body['error']['message'] ?? $body['error']['code'] ?? $response->body();
             Log::error('OpenRouter API error', [
                 'status' => $response->status(),
                 'body' => $response->body(),
+                'model' => $this->model,
             ]);
 
+            if ($response->status() === 401) {
+                return 'OpenRouter API key is invalid or expired. Go to openrouter.ai/keys to create a new key, then update OPENROUTER_API_KEY in your backend .env file.';
+            }
+            if ($response->status() === 429) {
+                return 'AI is busy right now. Please try again in a minute.';
+            }
+
+            // Try fallback model on 4xx/5xx (e.g. model deprecated or overloaded)
+            if ($this->model !== $this->fallbackModel) {
+                Log::info('OpenRouter: Retrying with fallback model', ['fallback' => $this->fallbackModel]);
+                $originalModel = $this->model;
+                $this->model = $this->fallbackModel;
+                $result = $this->callOpenRouter($messages);
+                $this->model = $originalModel;
+                return $result;
+            }
+
             return 'I apologize, but I\'m having trouble connecting right now. Please try again in a moment.';
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('OpenRouter connection failed', ['message' => $e->getMessage()]);
+            return 'Connection to AI service timed out. Please check your internet and try again.';
         } catch (\Exception $e) {
-            Log::error('OpenRouter exception: ' . $e->getMessage());
+            Log::error('OpenRouter exception', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return 'I\'m temporarily unavailable. Please try again shortly.';
         }
     }

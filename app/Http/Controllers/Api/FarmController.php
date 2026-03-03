@@ -5,11 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FarmField;
 use App\Models\JournalEntry;
+use App\Services\FarmImageAnalysisService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class FarmController extends Controller
 {
+    public function __construct(private FarmImageAnalysisService $imageAnalysisService) {}
+
     public function overview(Request $request): JsonResponse
     {
         /** @var \App\Models\User $user */
@@ -207,5 +210,43 @@ class FarmController extends Controller
             ->delete();
 
         return response()->json(['message' => 'Journal entry deleted.']);
+    }
+
+    public function analyzeImage(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'imageBase64' => ['required', 'string'],
+            'farmFieldId' => ['nullable', 'integer', 'exists:farm_fields,id'],
+        ]);
+
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        if (isset($validated['farmFieldId'])) {
+            $ownsField = FarmField::where('id', $validated['farmFieldId'])
+                ->where('user_id', $user->id)
+                ->exists();
+            if (! $ownsField) {
+                return response()->json(['message' => 'Field not found.'], 404);
+            }
+        }
+
+        $result = $this->imageAnalysisService->analyze(
+            $user,
+            $validated['imageBase64'],
+            $validated['farmFieldId'] ?? null,
+        );
+
+        return response()->json(['analysis' => $result]);
+    }
+
+    public function scanHistory(Request $request): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        return response()->json([
+            'history' => $this->imageAnalysisService->getHistory($user),
+        ]);
     }
 }
