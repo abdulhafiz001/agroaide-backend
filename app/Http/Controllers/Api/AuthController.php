@@ -30,6 +30,7 @@ class AuthController extends Controller
             'irrigationAccess' => ['nullable', Rule::in(['rain-fed', 'drip', 'sprinkler', 'flood'])],
             'farmLatitude' => ['nullable', 'numeric', 'between:-90,90'],
             'farmLongitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'preferredLanguage' => ['nullable', 'string', Rule::in(['en', 'ha', 'yo', 'pcm'])],
         ]);
 
         $user = User::create([
@@ -46,6 +47,7 @@ class AuthController extends Controller
             'experience_level' => $validated['experienceLevel'] ?? 'beginner',
             'soil_type' => $validated['soilType'] ?? 'Loamy',
             'irrigation_access' => $validated['irrigationAccess'] ?? 'drip',
+            'preferred_language' => $validated['preferredLanguage'] ?? 'en',
         ]);
 
         $user->tokens()->delete();
@@ -114,6 +116,8 @@ class AuthController extends Controller
             'farmLatitude' => ['nullable', 'numeric', 'between:-90,90'],
             'farmLongitude' => ['nullable', 'numeric', 'between:-180,180'],
             'farmSizeHectares' => ['nullable', 'numeric', 'min:0'],
+            'preferredLanguage' => ['nullable', 'string', Rule::in(['en', 'ha', 'yo', 'pcm'])],
+            'pushToken' => ['nullable', 'string', 'max:255'],
             'crops' => ['nullable', 'array'],
             'crops.*' => ['string', 'max:100'],
             'experienceLevel' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
@@ -134,6 +138,8 @@ class AuthController extends Controller
         if (isset($validated['experienceLevel'])) $updateData['experience_level'] = $validated['experienceLevel'];
         if (isset($validated['soilType'])) $updateData['soil_type'] = $validated['soilType'];
         if (isset($validated['irrigationAccess'])) $updateData['irrigation_access'] = $validated['irrigationAccess'];
+        if (isset($validated['preferredLanguage'])) $updateData['preferred_language'] = $validated['preferredLanguage'];
+        if (array_key_exists('pushToken', $validated)) $updateData['push_token'] = $validated['pushToken'];
 
         $user->update($updateData);
         $user->refresh();
@@ -205,6 +211,7 @@ class AuthController extends Controller
             'preferredTheme' => $user->preferred_theme ?? 'light',
             'farmLatitude' => $user->farm_latitude,
             'farmLongitude' => $user->farm_longitude,
+            'preferredLanguage' => $user->preferred_language ?? 'en',
         ];
     }
 }

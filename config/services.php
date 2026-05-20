@@ -46,4 +46,14 @@ return [
         'endpoint' => 'https://my-api.plantnet.org/v2',
     ],
 
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'endpoint' => 'https://api.groq.com/openai/v1/audio/transcriptions',
+        'model' => 'whisper-large-v3',
+    ],
+
+    'translation' => [
+        'model' => env('TRANSLATION_MODEL', 'mistralai/mistral-nemo'),
+    ],
+
 ];

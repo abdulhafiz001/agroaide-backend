@@ -10,8 +10,11 @@ class FarmImageAnalysis extends Model
     protected $fillable = [
         'user_id',
         'farm_field_id',
+        'latitude',
+        'longitude',
         'image_path',
         'condition',
+        'disease_name',
         'result_json',
     ];
 

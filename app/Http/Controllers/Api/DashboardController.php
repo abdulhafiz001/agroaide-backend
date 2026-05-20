@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
 use App\Services\AiAdvisorService;
+use App\Services\DiseaseOutbreakService;
+use App\Services\TranslationService;
 use App\Services\WeatherService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +21,8 @@ class DashboardController extends Controller
     public function __construct(
         private WeatherService $weatherService,
         private AiAdvisorService $advisorService,
+        private TranslationService $translationService,
+        private DiseaseOutbreakService $outbreakService,
     ) {}
 
     /**
@@ -95,6 +99,14 @@ class DashboardController extends Controller
             ->where('read', false)
             ->count();
 
+        $lang = $user->preferred_language ?? 'en';
+        if ($lang !== 'en') {
+            $primaryAlert['title'] = $this->translationService->translate($primaryAlert['title'], $lang);
+            $primaryAlert['advice'] = $this->translationService->translate($primaryAlert['advice'], $lang);
+        }
+
+        $outbreakAlerts = $this->outbreakService->getAlertsForUser($user);
+
         return response()->json([
             'user' => [
                 'name' => $user->name,
@@ -107,6 +119,7 @@ class DashboardController extends Controller
             'aiInsights' => self::FALLBACK_AI_INSIGHTS,
             'unreadNotifications' => $unreadNotifs,
             'currentWeather' => $weather['current'] ?? [],
+            'outbreakAlerts' => $outbreakAlerts,
         ]);
     }
 

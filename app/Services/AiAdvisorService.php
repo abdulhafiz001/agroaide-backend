@@ -32,7 +32,8 @@ class AiAdvisorService
             'message' => $message,
         ]);
 
-        $systemPrompt = $this->buildSystemPrompt($user);
+        $lang = $user->preferred_language ?? 'en';
+        $systemPrompt = $this->buildSystemPrompt($user, $lang);
         $conversationHistory = $this->getRecentConversation($user, 10);
 
         $messages = [
@@ -161,7 +162,7 @@ class AiAdvisorService
         ];
     }
 
-    private function buildSystemPrompt(User $user): string
+    private function buildSystemPrompt(User $user, string $lang = 'en'): string
     {
         $name = $user->name ?? 'Farmer';
         $farmName = $user->farm_name ?? 'the farm';
@@ -199,7 +200,7 @@ class AiAdvisorService
             }
         }
 
-        return <<<PROMPT
+        $prompt = <<<PROMPT
 You are AgroAide AI, a personalized agricultural advisor for Nigerian farmers. You are speaking with {$name}, who manages "{$farmName}" in {$location}.
 
 Farm details:
@@ -220,6 +221,13 @@ Important rules:
 7. Never provide medical or legal advice
 8. Always be encouraging and supportive
 PROMPT;
+
+        if ($lang !== 'en') {
+            $langName = TranslationService::languageName($lang);
+            $prompt .= "\n\nLANGUAGE: The farmer prefers {$langName}. They may write to you in {$langName} or English. ALWAYS respond in {$langName}. Keep your language natural, simple, and farmer-friendly. Use local farming terms when appropriate.";
+        }
+
+        return $prompt;
     }
 
     private function getRecentConversation(User $user, int $limit = 10): \Illuminate\Support\Collection

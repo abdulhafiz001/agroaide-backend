@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\FarmController;
 use App\Http\Controllers\Api\MarketController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\OutbreakController;
 use App\Http\Controllers\Api\SystemController;
 use App\Http\Controllers\Api\WeatherController;
 use Illuminate\Support\Facades\Route;
@@ -77,6 +78,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/advisor/chat', [AdvisorController::class, 'chat']);
     Route::get('/advisor/suggestions', [AdvisorController::class, 'suggestions']);
     Route::get('/advisor/daily-insight', [AdvisorController::class, 'dailyInsight']);
+    Route::post('/advisor/transcribe', [AdvisorController::class, 'transcribeVoice']);
     Route::get('/dashboard/snapshot', [DashboardController::class, 'snapshot']);
     Route::get('/dashboard/ai-insights', [DashboardController::class, 'aiInsights']);
     Route::get('/market/intel', [MarketController::class, 'intel']);
@@ -85,6 +87,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
+
+    Route::get('/outbreak/heatmap', [OutbreakController::class, 'heatmap']);
+    Route::get('/outbreak/alerts', [OutbreakController::class, 'alerts']);
 
     Route::post('/system/sync-offline', [SystemController::class, 'syncOfflineBrief']);
     Route::post('/system/export-request', [SystemController::class, 'requestExport']);

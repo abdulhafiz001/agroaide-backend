@@ -17,8 +17,10 @@ class FarmImageAnalysisService
     private string $plantNetKey;
     private string $plantNetEndpoint;
 
-    public function __construct(private WeatherService $weatherService)
-    {
+    public function __construct(
+        private WeatherService $weatherService,
+        private DiseaseOutbreakService $outbreakService,
+    ) {
         $this->openRouterKey = trim(config('services.openrouter.api_key') ?? env('OPENROUTER_API_KEY', ''));
         $this->visionModel = trim(config('services.openrouter.vision_model') ?? env('OPENROUTER_VISION_MODEL', 'qwen/qwen3-vl-235b-a22b-thinking'));
         $this->plantNetKey = trim(config('services.plantnet.api_key') ?? env('PLANTNET_API_KEY', ''));
@@ -36,20 +38,34 @@ class FarmImageAnalysisService
         }
 
         $plantNetResult = $this->callPlantNet($base64Image);
-        $visionResult = $this->callVisionModel($user, $field, $base64Image, $plantNetResult);
+
+        $lang = $user->preferred_language ?? 'en';
+        $visionResult = $this->callVisionModel($user, $field, $base64Image, $plantNetResult, $lang);
 
         $storedPath = $this->storeImage($user, $base64Image);
 
-        FarmImageAnalysis::create([
+        $diseaseName = null;
+        if (isset($visionResult['disease']['name'])) {
+            $diseaseName = $visionResult['disease']['name'];
+        }
+
+        $scan = FarmImageAnalysis::create([
             'user_id' => $user->id,
             'farm_field_id' => $farmFieldId,
+            'latitude' => $user->farm_latitude,
+            'longitude' => $user->farm_longitude,
             'image_path' => $storedPath,
             'condition' => $visionResult['condition'] ?? 'unknown',
+            'disease_name' => $diseaseName,
             'result_json' => $visionResult,
         ]);
 
         if ($field && isset($visionResult['condition'])) {
             $this->updateFieldHealth($field, $visionResult['condition']);
+        }
+
+        if ($diseaseName) {
+            $this->outbreakService->checkForOutbreak($scan);
         }
 
         return $visionResult;
@@ -126,13 +142,13 @@ class FarmImageAnalysisService
         }
     }
 
-    private function callVisionModel(User $user, ?FarmField $field, string $base64Image, ?array $plantNetResult): array
+    private function callVisionModel(User $user, ?FarmField $field, string $base64Image, ?array $plantNetResult, string $lang = 'en'): array
     {
         if (empty($this->openRouterKey)) {
             return $this->fallbackResult('AI service is not configured.');
         }
 
-        $systemPrompt = $this->buildAnalysisPrompt($user, $field, $plantNetResult);
+        $systemPrompt = $this->buildAnalysisPrompt($user, $field, $plantNetResult, $lang);
 
         $imageUrl = $base64Image;
         if (! str_starts_with($imageUrl, 'data:image/')) {
@@ -203,7 +219,7 @@ class FarmImageAnalysisService
         }
     }
 
-    private function buildAnalysisPrompt(User $user, ?FarmField $field, ?array $plantNetResult): string
+    private function buildAnalysisPrompt(User $user, ?FarmField $field, ?array $plantNetResult, string $lang = 'en'): string
     {
         $name = $user->name ?? 'Farmer';
         $farmName = $user->farm_name ?? 'the farm';
@@ -261,7 +277,7 @@ PLANTNET;
             }
         }
 
-        return <<<PROMPT
+        $prompt = <<<PROMPT
 You are AgroAide Crop Scanner, an expert agricultural diagnostic AI for Nigerian farmers. You are analyzing a farm image for {$name}, who manages "{$farmName}" in {$location}.
 
 Farm context:
@@ -311,6 +327,13 @@ IMPORTANT RULES:
 5. The "disease" field should be null if no disease is detected.
 6. Always provide at least 2 recommendations even for healthy crops.
 PROMPT;
+
+        if ($lang !== 'en') {
+            $langName = TranslationService::languageName($lang);
+            $prompt .= "\n\nCRITICAL LANGUAGE INSTRUCTION: Write ALL human-readable text values (summary, conditionLabel, personalizedNote, all recommendation strings, disease descriptions, details) in {$langName}. Keep it natural, simple, and farmer-friendly in {$langName}. JSON keys must remain in English. Disease scientific names stay in English/Latin.";
+        }
+
+        return $prompt;
     }
 
     private function normalizeCondition(string $condition): string

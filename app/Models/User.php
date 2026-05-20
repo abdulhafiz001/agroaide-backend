@@ -29,11 +29,14 @@ class User extends Authenticatable
         'irrigation_access',
         'avatar_color',
         'preferred_theme',
+        'preferred_language',
+        'push_token',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
+        'push_token',
     ];
 
     protected function casts(): array
