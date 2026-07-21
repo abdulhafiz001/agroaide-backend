@@ -57,3 +57,21 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+To start this laravel application i use: php artisan serve --host=0.0.0.0 --port=8000
+
+## Push notifications (FCM)
+
+See [../docs/FIREBASE_FCM_SETUP.md](../docs/FIREBASE_FCM_SETUP.md) for Firebase + EAS setup.
+
+Scheduler commands:
+
+```bash
+php artisan schedule:work
+# or individually:
+php artisan agroaide:send-weather-alerts
+php artisan agroaide:send-daily-ai-insights
+php artisan agroaide:send-task-reminders
+php artisan agroaide:detect-outbreaks
+```
+

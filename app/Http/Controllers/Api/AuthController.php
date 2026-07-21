@@ -3,16 +3,25 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\PasswordResetCodeMail;
+use App\Mail\WelcomeMail;
+use App\Models\PasswordResetOtp;
 use App\Models\User;
+use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private const OTP_TTL_MINUTES = 15;
+
+    private const OTP_MAX_ATTEMPTS = 5;
+
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -53,6 +62,12 @@ class AuthController extends Controller
         $user->tokens()->delete();
         $token = $user->createToken('mobile-app')->plainTextToken;
 
+        try {
+            Mail::to($user->email)->send(new WelcomeMail($user));
+        } catch (\Throwable) {
+            // Registration should still succeed if mail delivery fails.
+        }
+
         return response()->json([
             'token' => $token,
             'profile' => $this->transformUserProfile($user),
@@ -62,15 +77,17 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $credentials = $request->validate([
-            'email' => ['required', 'email'],
+            'identifier' => ['required_without:email', 'nullable', 'string', 'max:255'],
+            'email' => ['required_without:identifier', 'nullable', 'string', 'max:255'],
             'password' => ['required', 'string'],
         ]);
 
-        $user = User::where('email', $credentials['email'])->first();
+        $identifier = trim((string) ($credentials['identifier'] ?? $credentials['email'] ?? ''));
+        $user = $this->findUserByIdentifier($identifier);
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
+                'identifier' => ['The provided credentials are incorrect.'],
             ]);
         }
 
@@ -117,7 +134,12 @@ class AuthController extends Controller
             'farmLongitude' => ['nullable', 'numeric', 'between:-180,180'],
             'farmSizeHectares' => ['nullable', 'numeric', 'min:0'],
             'preferredLanguage' => ['nullable', 'string', Rule::in(['en', 'ha', 'yo', 'pcm'])],
-            'pushToken' => ['nullable', 'string', 'max:255'],
+            'pushToken' => ['nullable', 'string', 'max:4096'],
+            'notificationPreferences' => ['nullable', 'array'],
+            'notificationPreferences.severeWeather' => ['nullable', 'boolean'],
+            'notificationPreferences.marketMovers' => ['nullable', 'boolean'],
+            'notificationPreferences.aiInsights' => ['nullable', 'boolean'],
+            'notificationPreferences.communityMentions' => ['nullable', 'boolean'],
             'crops' => ['nullable', 'array'],
             'crops.*' => ['string', 'max:100'],
             'experienceLevel' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
@@ -126,20 +148,52 @@ class AuthController extends Controller
         ]);
 
         $updateData = [];
-        if (isset($validated['fullName'])) $updateData['name'] = $validated['fullName'];
-        if (isset($validated['email'])) $updateData['email'] = $validated['email'];
-        if (array_key_exists('phoneNumber', $validated)) $updateData['phone_number'] = $validated['phoneNumber'];
-        if (array_key_exists('farmName', $validated)) $updateData['farm_name'] = $validated['farmName'];
-        if (array_key_exists('farmLocation', $validated)) $updateData['farm_location'] = $validated['farmLocation'];
-        if (array_key_exists('farmLatitude', $validated)) $updateData['farm_latitude'] = $validated['farmLatitude'];
-        if (array_key_exists('farmLongitude', $validated)) $updateData['farm_longitude'] = $validated['farmLongitude'];
-        if (isset($validated['farmSizeHectares'])) $updateData['farm_size_hectares'] = $validated['farmSizeHectares'];
-        if (isset($validated['crops'])) $updateData['crops'] = $validated['crops'];
-        if (isset($validated['experienceLevel'])) $updateData['experience_level'] = $validated['experienceLevel'];
-        if (isset($validated['soilType'])) $updateData['soil_type'] = $validated['soilType'];
-        if (isset($validated['irrigationAccess'])) $updateData['irrigation_access'] = $validated['irrigationAccess'];
-        if (isset($validated['preferredLanguage'])) $updateData['preferred_language'] = $validated['preferredLanguage'];
-        if (array_key_exists('pushToken', $validated)) $updateData['push_token'] = $validated['pushToken'];
+        if (isset($validated['fullName'])) {
+            $updateData['name'] = $validated['fullName'];
+        }
+        if (isset($validated['email'])) {
+            $updateData['email'] = $validated['email'];
+        }
+        if (array_key_exists('phoneNumber', $validated)) {
+            $updateData['phone_number'] = $validated['phoneNumber'];
+        }
+        if (array_key_exists('farmName', $validated)) {
+            $updateData['farm_name'] = $validated['farmName'];
+        }
+        if (array_key_exists('farmLocation', $validated)) {
+            $updateData['farm_location'] = $validated['farmLocation'];
+        }
+        if (array_key_exists('farmLatitude', $validated)) {
+            $updateData['farm_latitude'] = $validated['farmLatitude'];
+        }
+        if (array_key_exists('farmLongitude', $validated)) {
+            $updateData['farm_longitude'] = $validated['farmLongitude'];
+        }
+        if (isset($validated['farmSizeHectares'])) {
+            $updateData['farm_size_hectares'] = $validated['farmSizeHectares'];
+        }
+        if (isset($validated['crops'])) {
+            $updateData['crops'] = $validated['crops'];
+        }
+        if (isset($validated['experienceLevel'])) {
+            $updateData['experience_level'] = $validated['experienceLevel'];
+        }
+        if (isset($validated['soilType'])) {
+            $updateData['soil_type'] = $validated['soilType'];
+        }
+        if (isset($validated['irrigationAccess'])) {
+            $updateData['irrigation_access'] = $validated['irrigationAccess'];
+        }
+        if (isset($validated['preferredLanguage'])) {
+            $updateData['preferred_language'] = $validated['preferredLanguage'];
+        }
+        if (array_key_exists('pushToken', $validated)) {
+            $updateData['push_token'] = $validated['pushToken'];
+        }
+        if (isset($validated['notificationPreferences'])) {
+            $current = is_array($user->notification_preferences) ? $user->notification_preferences : [];
+            $updateData['notification_preferences'] = array_merge($current, $validated['notificationPreferences']);
+        }
 
         $user->update($updateData);
         $user->refresh();
@@ -174,23 +228,128 @@ class AuthController extends Controller
     public function requestPasswordReset(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'email' => ['required', 'email'],
+            'identifier' => ['required_without:email', 'nullable', 'string', 'max:255'],
+            'email' => ['required_without:identifier', 'nullable', 'string', 'max:255'],
         ]);
 
-        $user = User::where('email', $validated['email'])->first();
+        $identifier = trim((string) ($validated['identifier'] ?? $validated['email'] ?? ''));
+        $ip = (string) $request->ip();
+
+        $rateKey = 'password-reset:'.sha1(strtolower($identifier).'|'.$ip);
+        if (RateLimiter::tooManyAttempts($rateKey, 5)) {
+            $seconds = RateLimiter::availableIn($rateKey);
+
+            return response()->json([
+                'message' => "Too many recovery attempts. Please try again in {$seconds} seconds.",
+            ], 429);
+        }
+        RateLimiter::hit($rateKey, 3600);
+
+        $genericMessage = 'If an account exists for that email or phone, a recovery code has been sent to the registered email address.';
+
+        $user = $this->findUserByIdentifier($identifier);
+
+        if ($user && filled($user->email)) {
+            $userRateKey = 'password-reset-user:'.$user->id;
+            if (! RateLimiter::tooManyAttempts($userRateKey, 3)) {
+                RateLimiter::hit($userRateKey, 3600);
+
+                $code = (string) random_int(100000, 999999);
+
+                PasswordResetOtp::where('user_id', $user->id)->delete();
+                PasswordResetOtp::create([
+                    'user_id' => $user->id,
+                    'code_hash' => Hash::make($code),
+                    'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES),
+                    'attempts' => 0,
+                    'request_ip' => $ip,
+                ]);
+
+                try {
+                    Mail::to($user->email)->send(new PasswordResetCodeMail($user, $code, self::OTP_TTL_MINUTES));
+                } catch (\Throwable) {
+                    // Keep generic response to avoid leaking mail infrastructure issues.
+                }
+            }
+        }
+
+        return response()->json([
+            'message' => $genericMessage,
+        ]);
+    }
+
+    public function resetPasswordWithCode(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'identifier' => ['required', 'string', 'max:255'],
+            'code' => ['required', 'string', 'size:6'],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user = $this->findUserByIdentifier(trim($validated['identifier']));
 
         if (! $user) {
             throw ValidationException::withMessages([
-                'email' => ['Unable to send recovery link. Please verify this email.'],
+                'code' => ['Invalid or expired recovery code.'],
             ]);
         }
 
-        $token = Password::broker()->createToken($user);
+        /** @var \App\Models\PasswordResetOtp|null $otp */
+        $otp = PasswordResetOtp::where('user_id', $user->id)
+            ->latest('id')
+            ->first();
+
+        if (! $otp || $otp->expires_at->isPast()) {
+            throw ValidationException::withMessages([
+                'code' => ['Invalid or expired recovery code.'],
+            ]);
+        }
+
+        if ($otp->attempts >= self::OTP_MAX_ATTEMPTS) {
+            $otp->delete();
+            throw ValidationException::withMessages([
+                'code' => ['Too many invalid attempts. Please request a new recovery code.'],
+            ]);
+        }
+
+        if (! Hash::check($validated['code'], $otp->code_hash)) {
+            $otp->increment('attempts');
+            throw ValidationException::withMessages([
+                'code' => ['Invalid or expired recovery code.'],
+            ]);
+        }
+
+        $user->update([
+            'password' => Hash::make($validated['password']),
+        ]);
+        $user->tokens()->delete();
+        $otp->delete();
 
         return response()->json([
-            'message' => 'Recovery link sent successfully.',
-            'resetToken' => $token,
+            'message' => 'Password updated successfully. You can sign in with your new password.',
         ]);
+    }
+
+    private function findUserByIdentifier(string $identifier): ?User
+    {
+        if ($identifier === '') {
+            return null;
+        }
+
+        if (str_contains($identifier, '@')) {
+            return User::whereRaw('LOWER(email) = ?', [strtolower($identifier)])->first();
+        }
+
+        $normalized = PhoneNumber::normalize($identifier);
+        if ($normalized === '') {
+            return null;
+        }
+
+        return User::query()
+            ->whereNotNull('phone_number')
+            ->where('phone_number', '!=', '')
+            ->get()
+            ->first(fn (User $user) => PhoneNumber::matches($user->phone_number, $identifier));
     }
 
     private function transformUserProfile(User $user): array
@@ -212,6 +371,12 @@ class AuthController extends Controller
             'farmLatitude' => $user->farm_latitude,
             'farmLongitude' => $user->farm_longitude,
             'preferredLanguage' => $user->preferred_language ?? 'en',
+            'notificationPreferences' => $user->notification_preferences ?? [
+                'severeWeather' => true,
+                'marketMovers' => true,
+                'aiInsights' => true,
+                'communityMentions' => false,
+            ],
         ];
     }
 }

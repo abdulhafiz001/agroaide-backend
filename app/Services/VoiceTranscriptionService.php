@@ -30,7 +30,10 @@ class VoiceTranscriptionService
     public function transcribe(string $audioBase64, string $languageHint = 'en'): array
     {
         if (! $this->isAvailable()) {
-            return ['success' => false, 'error' => 'Voice transcription is not configured. Set GROQ_API_KEY in backend .env (free at groq.com).'];
+            return [
+                'success' => false,
+                'error' => 'Voice transcription is not configured. Add GROQ_API_KEY to agroaide-backend/.env (free key at https://console.groq.com/keys), then restart the backend.',
+            ];
         }
 
         try {

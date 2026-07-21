@@ -16,12 +16,24 @@ class WeatherController extends Controller
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $lat = $user->farm_latitude ?? 6.8402;
-        $lng = $user->farm_longitude ?? 7.3705;
+        if ($user->farm_latitude === null || $user->farm_longitude === null) {
+            return response()->json([
+                'hasFarmLocation' => false,
+                'current' => [],
+                'soilHealth' => [],
+                'weatherForecast' => [],
+                'hourly' => [],
+                'alerts' => [],
+            ]);
+        }
 
-        $weather = $this->weatherService->getWeather((float) $lat, (float) $lng);
+        $weather = $this->weatherService->getWeather(
+            (float) $user->farm_latitude,
+            (float) $user->farm_longitude,
+        );
 
         return response()->json([
+            'hasFarmLocation' => true,
             'current' => $weather['current'] ?? [],
             'soilHealth' => $weather['soilHealth'] ?? [],
             'weatherForecast' => $weather['forecast'] ?? [],

@@ -31,6 +31,7 @@ class User extends Authenticatable
         'preferred_theme',
         'preferred_language',
         'push_token',
+        'notification_preferences',
     ];
 
     protected $hidden = [
@@ -45,6 +46,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'crops' => 'array',
+            'notification_preferences' => 'array',
             'farm_size_hectares' => 'float',
             'farm_latitude' => 'float',
             'farm_longitude' => 'float',

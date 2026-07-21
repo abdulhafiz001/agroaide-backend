@@ -43,21 +43,28 @@ class FarmController extends Controller
                 'fieldName' => $e->farmField?->name,
             ]);
 
-        $lat = $user->farm_latitude ?? 6.8402;
-        $lng = $user->farm_longitude ?? 7.3705;
+        $hasLocation = $user->farm_latitude !== null && $user->farm_longitude !== null;
+        $map = null;
 
-        return response()->json([
-            'fields' => $fields,
-            'journal' => $journal,
-            'map' => [
-                'center' => ['latitude' => (float) $lat, 'longitude' => (float) $lng],
+        if ($hasLocation) {
+            $lat = (float) $user->farm_latitude;
+            $lng = (float) $user->farm_longitude;
+            $map = [
+                'center' => ['latitude' => $lat, 'longitude' => $lng],
                 'polygon' => [
                     ['latitude' => $lat + 0.0003, 'longitude' => $lng - 0.0015],
                     ['latitude' => $lat + 0.0006, 'longitude' => $lng + 0.0015],
                     ['latitude' => $lat - 0.0007, 'longitude' => $lng + 0.002],
                     ['latitude' => $lat - 0.001, 'longitude' => $lng - 0.001],
                 ],
-            ],
+            ];
+        }
+
+        return response()->json([
+            'fields' => $fields,
+            'journal' => $journal,
+            'map' => $map,
+            'hasFarmLocation' => $hasLocation,
             'farmSummary' => [
                 'farmName' => $user->farm_name ?? 'My Farm',
                 'farmLocation' => $user->farm_location ?? 'Unknown location',
@@ -237,7 +244,10 @@ class FarmController extends Controller
             $validated['farmFieldId'] ?? null,
         );
 
-        return response()->json(['analysis' => $result]);
+        return response()->json([
+            'scanId' => $result['scanId'] ?? null,
+            'analysis' => $result['analysis'] ?? $result,
+        ]);
     }
 
     public function scanHistory(Request $request): JsonResponse
@@ -248,5 +258,31 @@ class FarmController extends Controller
         return response()->json([
             'history' => $this->imageAnalysisService->getHistory($user),
         ]);
+    }
+
+    public function scanDetail(Request $request, string $scanId): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+        $scan = $this->imageAnalysisService->getScanForUser($user, $scanId);
+
+        if (! $scan) {
+            return response()->json(['message' => 'Scan not found.'], 404);
+        }
+
+        return response()->json(['scan' => $scan]);
+    }
+
+    public function scanImage(Request $request, string $scanId)
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+        $response = $this->imageAnalysisService->getImageResponseForUser($user, $scanId);
+
+        if (! $response) {
+            return response()->json(['message' => 'Scan image not found.'], 404);
+        }
+
+        return $response;
     }
 }

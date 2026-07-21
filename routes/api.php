@@ -15,20 +15,27 @@ use Illuminate\Support\Facades\Route;
 // Quick connectivity check - no auth, no DB, returns immediately
 Route::get('/health', fn () => response()->json(['ok' => true, 'message' => 'AgroAide API is reachable']));
 
-// Debug: test OpenRouter (dev only, no auth)
-Route::get('/debug/openrouter-test', function () {
+// Debug: test GitHub Models (dev only, no auth)
+Route::get('/debug/github-models-test', function () {
     if (! app()->environment('local')) {
         return response()->json(['error' => 'Not available'], 404);
     }
-    $key = config('services.openrouter.api_key') ?? env('OPENROUTER_API_KEY', '');
-    $model = config('services.openrouter.model') ?? env('OPENROUTER_MODEL', 'deepseek/deepseek-r1-0528:free');
+    $key = config('services.github_models.api_key', '');
+    $model = config('services.github_models.model', 'openai/gpt-4o-mini');
+    $endpoint = config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions');
+    $apiVersion = config('services.github_models.api_version', '2022-11-28');
     if (empty($key)) {
-        return response()->json(['ok' => false, 'error' => 'OPENROUTER_API_KEY not set in .env']);
+        return response()->json(['ok' => false, 'error' => 'GITHUB_MODELS_API_KEY not set in .env']);
     }
     try {
         $r = \Illuminate\Support\Facades\Http::timeout(30)
-            ->withHeaders(['Authorization' => 'Bearer ' . $key, 'Content-Type' => 'application/json'])
-            ->post('https://openrouter.ai/api/v1/chat/completions', [
+            ->withHeaders([
+                'Authorization' => 'Bearer ' . $key,
+                'Accept' => 'application/vnd.github+json',
+                'X-GitHub-Api-Version' => $apiVersion,
+                'Content-Type' => 'application/json',
+            ])
+            ->post($endpoint, [
                 'model' => $model,
                 'messages' => [['role' => 'user', 'content' => 'Say "OK" if you can read this.']],
                 'max_tokens' => 20,
@@ -48,6 +55,7 @@ Route::prefix('auth')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/recovery', [AuthController::class, 'requestPasswordReset']);
+    Route::post('/recovery/reset', [AuthController::class, 'resetPasswordWithCode']);
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/me', [AuthController::class, 'me']);
@@ -68,6 +76,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/map/fields', [FarmController::class, 'mapFields']);
     Route::post('/farm/analyze-image', [FarmController::class, 'analyzeImage']);
     Route::get('/farm/scan-history', [FarmController::class, 'scanHistory']);
+    Route::get('/farm/scan-history/{scanId}/image', [FarmController::class, 'scanImage']);
+    Route::get('/farm/scan-history/{scanId}', [FarmController::class, 'scanDetail']);
 
     Route::get('/calendar', [CalendarController::class, 'index']);
     Route::post('/calendar/tasks', [CalendarController::class, 'store']);
@@ -76,6 +86,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/calendar/tasks/{taskId}/complete', [CalendarController::class, 'completeTask']);
     Route::get('/weather/forecast', [WeatherController::class, 'forecast']);
     Route::post('/advisor/chat', [AdvisorController::class, 'chat']);
+    Route::get('/advisor/history', [AdvisorController::class, 'history']);
     Route::get('/advisor/suggestions', [AdvisorController::class, 'suggestions']);
     Route::get('/advisor/daily-insight', [AdvisorController::class, 'dailyInsight']);
     Route::post('/advisor/transcribe', [AdvisorController::class, 'transcribeVoice']);

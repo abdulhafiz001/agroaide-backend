@@ -10,7 +10,8 @@ class TranslationService
 {
     private string $apiKey;
     private string $model;
-    private string $endpoint = 'https://openrouter.ai/api/v1/chat/completions';
+    private string $endpoint;
+    private string $apiVersion;
 
     private const LANGUAGE_NAMES = [
         'en' => 'English',
@@ -21,8 +22,10 @@ class TranslationService
 
     public function __construct()
     {
-        $this->apiKey = trim(config('services.openrouter.api_key') ?? env('OPENROUTER_API_KEY', ''));
-        $this->model = trim(config('services.translation.model') ?? env('TRANSLATION_MODEL', 'mistralai/mistral-nemo'));
+        $this->apiKey = trim(config('services.github_models.api_key', ''));
+        $this->model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
+        $this->endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
+        $this->apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
     }
 
     public static function languageName(string $code): string
@@ -60,9 +63,13 @@ class TranslationService
         }
 
         try {
+            Log::info('GitHub Models: translating text', ['target_lang' => $langName, 'model' => $this->model]);
+
             $response = Http::timeout(20)
                 ->withHeaders([
                     'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Accept' => 'application/vnd.github+json',
+                    'X-GitHub-Api-Version' => $this->apiVersion,
                     'Content-Type' => 'application/json',
                 ])
                 ->post($this->endpoint, [
@@ -80,10 +87,11 @@ class TranslationService
 
             if ($response->successful()) {
                 $content = $response->json('choices.0.message.content') ?? $text;
-                $content = preg_replace('/<think>.*?<\/think>/s', '', $content);
+                Log::info('GitHub Models: translation complete', ['target_lang' => $langName]);
                 return trim($content);
             }
 
+            Log::warning('GitHub Models translation failed', ['status' => $response->status(), 'body' => $response->body()]);
             return $text;
         } catch (\Exception $e) {
             Log::warning('Translation failed', ['error' => $e->getMessage()]);

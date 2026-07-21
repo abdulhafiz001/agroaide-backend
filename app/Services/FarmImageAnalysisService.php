@@ -11,24 +11,28 @@ use Illuminate\Support\Facades\Storage;
 
 class FarmImageAnalysisService
 {
-    private string $openRouterKey;
+    private string $githubModelsKey;
     private string $visionModel;
-    private string $openRouterEndpoint = 'https://openrouter.ai/api/v1/chat/completions';
+    private string $githubModelsEndpoint;
+    private string $githubModelsApiVersion;
     private string $plantNetKey;
     private string $plantNetEndpoint;
 
     public function __construct(
         private WeatherService $weatherService,
         private DiseaseOutbreakService $outbreakService,
+        private NotificationDispatcher $dispatcher,
     ) {
-        $this->openRouterKey = trim(config('services.openrouter.api_key') ?? env('OPENROUTER_API_KEY', ''));
-        $this->visionModel = trim(config('services.openrouter.vision_model') ?? env('OPENROUTER_VISION_MODEL', 'qwen/qwen3-vl-235b-a22b-thinking'));
+        $this->githubModelsKey = trim(config('services.github_models.api_key', ''));
+        $this->visionModel = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
+        $this->githubModelsEndpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
+        $this->githubModelsApiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
         $this->plantNetKey = trim(config('services.plantnet.api_key') ?? env('PLANTNET_API_KEY', ''));
         $this->plantNetEndpoint = trim(config('services.plantnet.endpoint') ?? 'https://my-api.plantnet.org/v2');
     }
 
     /**
-     * Run full analysis pipeline: PlantNet disease check → OpenRouter vision analysis.
+     * Run full analysis pipeline: PlantNet disease check → GitHub Models vision analysis.
      */
     public function analyze(User $user, string $base64Image, ?int $farmFieldId = null): array
     {
@@ -65,32 +69,121 @@ class FarmImageAnalysisService
         }
 
         if ($diseaseName) {
+            $cropLabel = $field?->crop ?? 'crop';
+            $this->dispatcher->notify(
+                $user,
+                'scan_result',
+                "Scan result: {$diseaseName}",
+                "Your {$cropLabel} scan detected {$diseaseName}. Open AgroAide for treatment recommendations.",
+                [
+                    'scanId' => $scan->id,
+                    'disease' => $diseaseName,
+                    'farmFieldId' => $farmFieldId,
+                ],
+                [
+                    'push' => true,
+                    'dedupeMinutes' => 180,
+                    'dedupeKey' => 'scanId',
+                ],
+            );
+
             $this->outbreakService->checkForOutbreak($scan);
         }
 
-        return $visionResult;
+        return [
+            'scanId' => (string) $scan->id,
+            'analysis' => $visionResult,
+        ];
     }
 
     /**
      * Get scan history for a user.
      */
-    public function getHistory(User $user, int $limit = 10): array
+    public function getHistory(User $user, int $limit = 20): array
     {
         return FarmImageAnalysis::where('user_id', $user->id)
             ->with('farmField:id,name,crop')
             ->orderBy('created_at', 'desc')
             ->limit($limit)
             ->get()
-            ->map(fn (FarmImageAnalysis $a) => [
-                'id' => (string) $a->id,
-                'date' => $a->created_at->toIso8601String(),
-                'condition' => $a->condition,
-                'fieldName' => $a->farmField?->name,
-                'fieldCrop' => $a->farmField?->crop,
-                'summary' => $a->result_json['summary'] ?? null,
-                'imagePath' => $a->image_path ? Storage::url($a->image_path) : null,
-            ])
+            ->map(fn (FarmImageAnalysis $a) => $this->transformScanSummary($a))
             ->toArray();
+    }
+
+    public function getScanForUser(User $user, int|string $scanId): ?array
+    {
+        $scan = FarmImageAnalysis::where('user_id', $user->id)
+            ->where('id', $scanId)
+            ->with('farmField:id,name,crop')
+            ->first();
+
+        if (! $scan) {
+            return null;
+        }
+
+        return [
+            ...$this->transformScanSummary($scan),
+            'analysis' => is_array($scan->result_json) ? $scan->result_json : [],
+            'farmFieldId' => $scan->farm_field_id ? (string) $scan->farm_field_id : null,
+        ];
+    }
+
+    private function transformScanSummary(FarmImageAnalysis $a): array
+    {
+        $analysis = is_array($a->result_json) ? $a->result_json : [];
+
+        return [
+            'id' => (string) $a->id,
+            'date' => $a->created_at->toIso8601String(),
+            'condition' => $a->condition,
+            'conditionLabel' => $analysis['conditionLabel'] ?? ucfirst((string) $a->condition),
+            'diseaseName' => $a->disease_name,
+            'fieldName' => $a->farmField?->name,
+            'fieldCrop' => $a->farmField?->crop,
+            'summary' => $analysis['summary'] ?? null,
+            'confidencePercent' => $analysis['confidencePercent'] ?? null,
+            // Served via authenticated API so private-disk images work on devices
+            // (APP_URL/localhost public URLs break on real phones).
+            'imagePath' => $a->image_path
+                ? "/farm/scan-history/{$a->id}/image"
+                : null,
+        ];
+    }
+
+    /**
+     * Stream a scan image from public or private local storage.
+     */
+    public function getImageResponseForUser(User $user, int|string $scanId)
+    {
+        $scan = FarmImageAnalysis::where('user_id', $user->id)
+            ->where('id', $scanId)
+            ->first();
+
+        if (! $scan || ! $scan->image_path) {
+            return null;
+        }
+
+        $path = $scan->image_path;
+
+        foreach (['public', 'local'] as $disk) {
+            if (Storage::disk($disk)->exists($path)) {
+                return Storage::disk($disk)->response($path, null, [
+                    'Content-Type' => 'image/jpeg',
+                    'Cache-Control' => 'private, max-age=86400',
+                ]);
+            }
+        }
+
+        // Laravel 11+ may store "local" files under storage/app/private
+        $privateAbsolute = storage_path('app/private/'.$path);
+        if (is_file($privateAbsolute)) {
+            return response()->file($privateAbsolute, [
+                'Content-Type' => 'image/jpeg',
+                'Cache-Control' => 'private, max-age=86400',
+            ]);
+        }
+
+        return null;
     }
 
     private function callPlantNet(string $base64Image): ?array
@@ -144,7 +237,7 @@ class FarmImageAnalysisService
 
     private function callVisionModel(User $user, ?FarmField $field, string $base64Image, ?array $plantNetResult, string $lang = 'en'): array
     {
-        if (empty($this->openRouterKey)) {
+        if (empty($this->githubModelsKey)) {
             return $this->fallbackResult('AI service is not configured.');
         }
 
@@ -173,14 +266,16 @@ class FarmImageAnalysisService
         ];
 
         try {
+            Log::info('GitHub Models: sending farm image analysis request', ['model' => $this->visionModel]);
+
             $response = Http::timeout(90)
                 ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->openRouterKey,
-                    'HTTP-Referer' => config('app.url', 'https://agroaide.ng'),
-                    'X-Title' => 'AgroAide Farm Scanner',
+                    'Authorization' => 'Bearer ' . $this->githubModelsKey,
+                    'Accept' => 'application/vnd.github+json',
+                    'X-GitHub-Api-Version' => $this->githubModelsApiVersion,
                     'Content-Type' => 'application/json',
                 ])
-                ->post($this->openRouterEndpoint, [
+                ->post($this->githubModelsEndpoint, [
                     'model' => $this->visionModel,
                     'messages' => $messages,
                     'max_tokens' => 2048,
@@ -191,7 +286,7 @@ class FarmImageAnalysisService
                 $data = $response->json();
                 $content = $data['choices'][0]['message']['content'] ?? '';
 
-                $content = preg_replace('/<think>.*?<\/think>/s', '', $content);
+                Log::info('GitHub Models: farm image analysis response received', ['model' => $this->visionModel]);
                 $content = trim($content);
 
                 $cleaned = preg_replace('/```json\s*|\s*```/', '', $content);
@@ -211,7 +306,7 @@ class FarmImageAnalysisService
                 return $this->parseUnstructuredResponse($content, $plantNetResult);
             }
 
-            Log::error('OpenRouter vision API error', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::error('GitHub Models vision API error', ['status' => $response->status(), 'body' => $response->body()]);
             return $this->fallbackResult('AI analysis service is temporarily unavailable. Please try again.');
         } catch (\Exception $e) {
             Log::error('Vision analysis exception', ['error' => $e->getMessage()]);
@@ -415,6 +510,7 @@ PROMPT;
             $filename = date('Ymd_His') . '_' . substr(md5(uniqid()), 0, 8) . '.jpg';
             $path = "{$dir}/{$filename}";
 
+            // Keep on the default local disk; images are served via authenticated API.
             Storage::disk('local')->put($path, $decoded);
 
             return $path;

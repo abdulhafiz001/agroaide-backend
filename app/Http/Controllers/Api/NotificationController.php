@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
+use App\Services\NotificationDispatcher;
 use App\Services\WeatherService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
-    public function __construct(private WeatherService $weatherService) {}
+    public function __construct(
+        private WeatherService $weatherService,
+        private NotificationDispatcher $dispatcher,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -63,7 +67,7 @@ class NotificationController extends Controller
 
     private function autoGenerateNotifications($user): void
     {
-        $todayKey = 'notif_generated_' . $user->id . '_' . date('Y-m-d');
+        $todayKey = 'notif_generated_'.$user->id.'_'.date('Y-m-d');
         if (cache()->has($todayKey)) {
             return;
         }
@@ -76,14 +80,29 @@ class NotificationController extends Controller
                 );
 
                 foreach (($weather['alerts'] ?? []) as $alert) {
-                    if ($alert['severity'] !== 'Low') {
-                        AppNotification::create([
-                            'user_id' => $user->id,
-                            'type' => 'weather',
-                            'title' => $alert['title'],
-                            'message' => $alert['advice'],
-                        ]);
+                    if (($alert['severity'] ?? 'Low') === 'Low') {
+                        continue;
                     }
+
+                    $alertKey = $alert['alertKey'] ?? md5(($alert['title'] ?? '').'|'.($alert['advice'] ?? ''));
+
+                    // In-app backup only; push is handled by agroaide:send-weather-alerts
+                    $this->dispatcher->notify(
+                        $user,
+                        'weather',
+                        $alert['title'] ?? 'Weather alert',
+                        $alert['advice'] ?? 'Check today’s weather conditions for your farm.',
+                        [
+                            'alertKey' => $alertKey,
+                            'severity' => $alert['severity'] ?? 'Moderate',
+                        ],
+                        [
+                            'push' => false,
+                            'preference' => 'severeWeather',
+                            'dedupeMinutes' => 60 * 12,
+                            'dedupeKey' => 'alertKey',
+                        ],
+                    );
                 }
             } catch (\Exception $e) {
                 // silently skip
@@ -96,21 +115,25 @@ class NotificationController extends Controller
             ->get();
 
         foreach ($upcomingTasks as $task) {
-            AppNotification::create([
-                'user_id' => $user->id,
-                'type' => 'system',
-                'title' => 'Task reminder: ' . $task->title,
-                'message' => "You have a {$task->period} task scheduled today: {$task->title}.",
-            ]);
+            $this->dispatcher->notify(
+                $user,
+                'system',
+                'Task reminder: '.$task->title,
+                "You have a {$task->period} task scheduled today: {$task->title}.",
+                ['taskId' => $task->id, 'period' => $task->period],
+                ['push' => false, 'dedupeMinutes' => 60 * 12, 'dedupeKey' => 'taskId'],
+            );
         }
 
         if ($upcomingTasks->isEmpty() && ! ($user->farm_latitude && $user->farm_longitude)) {
-            AppNotification::create([
-                'user_id' => $user->id,
-                'type' => 'ai',
-                'title' => 'Welcome to AgroAide',
-                'message' => 'Set up your farm location to get personalized weather alerts and farming insights.',
-            ]);
+            $this->dispatcher->notify(
+                $user,
+                'ai',
+                'Welcome to AgroAide',
+                'Set up your farm location to get personalized weather alerts and farming insights.',
+                ['welcome' => true],
+                ['push' => false, 'dedupeMinutes' => 60 * 24 * 7, 'dedupeKey' => 'welcome'],
+            );
         }
 
         cache()->put($todayKey, true, 86400);

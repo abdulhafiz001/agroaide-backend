@@ -38,6 +38,16 @@ class AdvisorController extends Controller
         ]);
     }
 
+    public function history(Request $request): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        return response()->json([
+            'messages' => $this->advisorService->history($user),
+        ]);
+    }
+
     public function dailyInsight(Request $request): JsonResponse
     {
         /** @var \App\Models\User $user */

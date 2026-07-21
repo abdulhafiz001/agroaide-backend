@@ -35,10 +35,11 @@ return [
         ],
     ],
 
-    'openrouter' => [
-        'api_key' => env('OPENROUTER_API_KEY'),
-        'model' => env('OPENROUTER_MODEL', 'deepseek/deepseek-r1-0528:free'),
-        'vision_model' => env('OPENROUTER_VISION_MODEL', 'qwen/qwen3-vl-235b-a22b-thinking'),
+    'github_models' => [
+        'api_key' => env('GITHUB_MODELS_API_KEY'),
+        'model' => 'openai/gpt-4o-mini',
+        'endpoint' => 'https://models.github.ai/inference/chat/completions',
+        'api_version' => '2022-11-28',
     ],
 
     'plantnet' => [
@@ -52,8 +53,11 @@ return [
         'model' => 'whisper-large-v3',
     ],
 
-    'translation' => [
-        'model' => env('TRANSLATION_MODEL', 'mistralai/mistral-nemo'),
+    'fcm' => [
+        'project_id' => env('FCM_PROJECT_ID'),
+        'credentials' => env('FCM_CREDENTIALS_PATH')
+            ? base_path(env('FCM_CREDENTIALS_PATH'))
+            : base_path('firebase-service-account.json'),
     ],
 
 ];

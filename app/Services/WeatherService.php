@@ -206,11 +206,23 @@ class WeatherService
         $alerts = [];
         $daily = $json['daily'] ?? [];
         $current = $json['current'] ?? [];
+        $hourly = $json['hourly'] ?? [];
 
         $todayPrecip = ($daily['precipitation_sum'] ?? [])[0] ?? 0;
         $todayMax = ($daily['temperature_2m_max'] ?? [])[0] ?? 30;
         $todayUv = ($daily['uv_index_max'] ?? [])[0] ?? 0;
         $windSpeed = $current['wind_speed_10m'] ?? 0;
+        $highRainChance = $this->findHighRainProbability($hourly);
+
+        if ($highRainChance !== null) {
+            $alerts[] = [
+                'severity' => 'Critical',
+                'title' => 'High chance of rain soon',
+                'advice' => "{$highRainChance['probability']}% chance of rain around {$highRainChance['timeLabel']}. Pause irrigation and plan field work carefully.",
+                'gradient' => ['#4a90e2', '#357abd'],
+                'alertKey' => 'rain_probability_90',
+            ];
+        }
 
         if ($todayPrecip > 20) {
             $alerts[] = [
@@ -218,6 +230,7 @@ class WeatherService
                 'title' => 'Heavy rainfall expected',
                 'advice' => "Expected {$todayPrecip}mm of rain today. Ensure proper drainage and avoid field work during peak rain hours.",
                 'gradient' => ['#4a90e2', '#357abd'],
+                'alertKey' => 'heavy_rain',
             ];
         } elseif ($todayPrecip > 5) {
             $alerts[] = [
@@ -225,6 +238,7 @@ class WeatherService
                 'title' => 'Rain expected today',
                 'advice' => "About {$todayPrecip}mm of rain expected. Good for irrigation savings — pause watering schedules.",
                 'gradient' => ['#4a90e2', '#7bb3f0'],
+                'alertKey' => 'rain_today',
             ];
         }
 
@@ -234,6 +248,7 @@ class WeatherService
                 'title' => 'High temperature warning',
                 'advice' => "Temperatures reaching {$todayMax}°C. Water crops early morning. Provide shade for sensitive transplants.",
                 'gradient' => ['#ff6b6b', '#fbd786'],
+                'alertKey' => 'high_temp',
             ];
         }
 
@@ -243,6 +258,7 @@ class WeatherService
                 'title' => 'High UV index',
                 'advice' => "UV index at {$todayUv}. Avoid extended field work between 11AM-3PM. Use protective gear.",
                 'gradient' => ['#f39c12', '#e74c3c'],
+                'alertKey' => 'high_uv',
             ];
         }
 
@@ -252,6 +268,7 @@ class WeatherService
                 'title' => 'Strong winds',
                 'advice' => "Wind speed at {$windSpeed} km/h. Secure loose structures and delay spraying activities.",
                 'gradient' => ['#95a5a6', '#7f8c8d'],
+                'alertKey' => 'strong_wind',
             ];
         }
 
@@ -261,10 +278,55 @@ class WeatherService
                 'title' => 'Good farming conditions',
                 'advice' => 'Weather looks favorable today. Great conditions for field work and planting activities.',
                 'gradient' => ['#2eb873', '#57b346'],
+                'alertKey' => 'good_conditions',
             ];
         }
 
         return $alerts;
+    }
+
+    /**
+     * Find ≥90% precipitation probability within the next 12 hours.
+     *
+     * @return array{probability: int, timeLabel: string}|null
+     */
+    private function findHighRainProbability(array $hourly): ?array
+    {
+        $probabilities = $hourly['precipitation_probability'] ?? [];
+        $times = $hourly['time'] ?? [];
+        if ($probabilities === [] || $times === []) {
+            return null;
+        }
+
+        $now = now();
+        $horizon = now()->addHours(12);
+        $best = null;
+
+        foreach ($times as $index => $time) {
+            $probability = (int) ($probabilities[$index] ?? 0);
+            if ($probability < 90) {
+                continue;
+            }
+
+            try {
+                $at = \Carbon\Carbon::parse($time);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if ($at->lt($now) || $at->gt($horizon)) {
+                continue;
+            }
+
+            if ($best === null || $probability > $best['probability']) {
+                $best = [
+                    'probability' => $probability,
+                    'timeLabel' => $at->format('g A'),
+                ];
+            }
+        }
+
+        return $best;
     }
 
     private function getMoistureTone(?float $moisture): string
