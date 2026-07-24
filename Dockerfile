@@ -69,8 +69,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         unzip \
         git \
+        pkg-config \
         libzip-dev \
         libicu-dev \
+        libonig-dev \
     && docker-php-ext-configure intl \
     && docker-php-ext-install -j"$(nproc)" \
         pdo_mysql \
