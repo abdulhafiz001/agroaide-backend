@@ -323,7 +323,7 @@ class FarmImageAnalysisService
         $soilType = $user->soil_type ?? 'unknown';
         $experience = $user->experience_level ?? 'beginner';
         $irrigation = $user->irrigation_access ?? 'rain-fed';
-        $farmSize = $user->farm_size_hectares ?? 0;
+        $farmSize = $user->farm_size_m2 ?? 0;
 
         $fieldContext = '';
         if ($field) {
@@ -334,7 +334,7 @@ class FarmImageAnalysisService
 Specific field being scanned:
 - Field name: {$field->name}
 - Crop: {$field->crop}
-- Area: {$field->area_hectares} hectares
+- Area: {$field->area_m2} square meters
 - Current recorded health: {$field->health_percentage}%
 - Soil moisture: {$field->moisture_percentage}%
 - Growth stage: {$daysStr}
@@ -376,7 +376,7 @@ PLANTNET;
 You are AgroAide Crop Scanner, an expert agricultural diagnostic AI for Nigerian farmers. You are analyzing a farm image for {$name}, who manages "{$farmName}" in {$location}.
 
 Farm context:
-- Size: {$farmSize} hectares
+- Size: {$farmSize} square meters
 - Main crops: {$crops}
 - Soil type: {$soilType}
 - Irrigation: {$irrigation}

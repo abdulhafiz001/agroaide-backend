@@ -4,11 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
+use App\Models\CropWatch;
+use App\Services\SeasonalCalendarService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class CalendarController extends Controller
 {
+    public function __construct(private SeasonalCalendarService $seasonalCalendar) {}
+
     public function index(Request $request): JsonResponse
     {
         /** @var \App\Models\User $user */
@@ -62,10 +66,34 @@ class CalendarController extends Controller
             'period' => ['nullable', 'in:morning,afternoon,evening'],
             'durationMinutes' => ['nullable', 'integer', 'min:5', 'max:480'],
             'impact' => ['nullable', 'in:low,medium,high'],
+            'clientUuid' => ['nullable', 'uuid'],
         ]);
+
+        if (! empty($validated['clientUuid'])) {
+            $existing = CalendarTask::where('user_id', $request->user()->id)
+                ->where('client_uuid', $validated['clientUuid'])
+                ->first();
+            if ($existing) {
+                return response()->json([
+                    'task' => [
+                        'id' => (string) $existing->id,
+                        'title' => $existing->title,
+                        'description' => $existing->description,
+                        'scheduledDate' => $existing->scheduled_date->toDateString(),
+                        'period' => $existing->period,
+                        'durationMinutes' => $existing->duration_minutes,
+                        'impact' => $existing->impact,
+                        'completed' => $existing->completed,
+                        'clientUuid' => $existing->client_uuid,
+                    ],
+                    'idempotent' => true,
+                ]);
+            }
+        }
 
         $task = CalendarTask::create([
             'user_id' => $request->user()->id,
+            'client_uuid' => $validated['clientUuid'] ?? null,
             'title' => $validated['title'],
             'description' => $validated['description'] ?? null,
             'scheduled_date' => $validated['scheduledDate'],
@@ -84,6 +112,7 @@ class CalendarController extends Controller
                 'durationMinutes' => $task->duration_minutes,
                 'impact' => $task->impact,
                 'completed' => $task->completed,
+                'clientUuid' => $task->client_uuid,
             ],
         ], 201);
     }
@@ -143,5 +172,80 @@ class CalendarController extends Controller
             'completed' => $task->completed,
             'message' => $completed ? 'Task marked as complete.' : 'Task unmarked.',
         ]);
+    }
+
+    public function seasonalSuggestions(Request $request): JsonResponse
+    {
+        /** @var \App\Models\User $user */
+        $user = $request->user();
+
+        $crop = $request->query('crop');
+        $fieldId = $request->query('fieldId');
+
+        $result = $this->seasonalCalendar->suggestionsForUser(
+            $user,
+            $crop ? (string) $crop : null,
+            $fieldId !== null ? (int) $fieldId : null,
+        );
+
+        return response()->json($result);
+    }
+
+    public function listCropWatches(Request $request): JsonResponse
+    {
+        $watches = CropWatch::where('user_id', $request->user()->id)
+            ->orderBy('crop')
+            ->get()
+            ->map(fn (CropWatch $w) => $this->serializeWatch($w));
+
+        return response()->json(['watches' => $watches]);
+    }
+
+    public function storeCropWatch(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'crop' => ['required', 'string', 'max:100'],
+            'notifyWhenPlantingWindow' => ['nullable', 'boolean'],
+        ]);
+
+        $crop = $this->seasonalCalendar->normalizeCropName($validated['crop']);
+
+        $watch = CropWatch::updateOrCreate(
+            [
+                'user_id' => $request->user()->id,
+                'crop' => $crop,
+            ],
+            [
+                'notify_when_planting_window' => $validated['notifyWhenPlantingWindow'] ?? true,
+            ],
+        );
+
+        return response()->json([
+            'watch' => $this->serializeWatch($watch),
+        ], $watch->wasRecentlyCreated ? 201 : 200);
+    }
+
+    public function destroyCropWatch(Request $request, int $id): JsonResponse
+    {
+        CropWatch::where('user_id', $request->user()->id)
+            ->where('id', $id)
+            ->firstOrFail()
+            ->delete();
+
+        return response()->json(['message' => 'Crop watch removed.']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeWatch(CropWatch $w): array
+    {
+        return [
+            'id' => (string) $w->id,
+            'crop' => $w->crop,
+            'notifyWhenPlantingWindow' => (bool) $w->notify_when_planting_window,
+            'lastNotifiedOn' => $w->last_notified_on?->toDateString(),
+            'createdAt' => $w->created_at?->toIso8601String(),
+        ];
     }
 }

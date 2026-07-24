@@ -6,17 +6,31 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-class JournalEntry extends Model
+class FieldTransaction extends Model
 {
     use HasFactory;
 
     protected $fillable = [
         'user_id',
-        'client_uuid',
         'farm_field_id',
+        'client_uuid',
         'type',
+        'category',
+        'amount',
+        'quantity',
+        'unit',
+        'occurred_on',
         'note',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'amount' => 'float',
+            'quantity' => 'float',
+            'occurred_on' => 'date',
+        ];
+    }
 
     public function user(): BelongsTo
     {

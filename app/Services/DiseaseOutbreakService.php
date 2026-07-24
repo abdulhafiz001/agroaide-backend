@@ -356,14 +356,22 @@ class DiseaseOutbreakService
 
     private function formatDistance(float $lat1, float $lng1, float $lat2, float $lng2): string
     {
-        $earthRadius = 6371;
+        return round(self::distanceKm($lat1, $lng1, $lat2, $lng2), 1).'km';
+    }
+
+    /**
+     * Great-circle distance in kilometers (Haversine, Earth radius 6371 km).
+     * Public for unit tests and reuse.
+     */
+    public static function distanceKm(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadius = 6371.0;
         $dLat = deg2rad($lat2 - $lat1);
         $dLng = deg2rad($lng2 - $lng1);
-        $a = sin($dLat / 2) ** 2 +
-            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-            sin($dLng / 2) ** 2;
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
         $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
 
-        return round($earthRadius * $c, 1).'km';
+        return $earthRadius * $c;
     }
 }

@@ -30,16 +30,6 @@ class MarketController extends Controller
         ]);
     }
 
-    public function nearbyFarmers(Request $request): JsonResponse
-    {
-        $location = $request->user()->farm_location ?? 'Nigeria';
-
-        return response()->json([
-            'farmers' => [],
-            'message' => "Community features coming soon for {$location}.",
-        ]);
-    }
-
     public function resources(): JsonResponse
     {
         return response()->json([

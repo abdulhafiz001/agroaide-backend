@@ -25,3 +25,9 @@ Thumbs.db
 allow-firewall.bat
 start-backend.bat
 firebase-service-account.json
+*-firebase-adminsdk-*.json
+google-services.json
+service-account*.json
+*.p8
+*.p12
+*.jks

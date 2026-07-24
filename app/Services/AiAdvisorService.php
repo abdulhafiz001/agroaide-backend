@@ -197,7 +197,7 @@ class AiAdvisorService
         $soilType = $user->soil_type ?? 'unknown';
         $experience = $user->experience_level ?? 'beginner';
         $irrigation = $user->irrigation_access ?? 'rain-fed';
-        $farmSize = $user->farm_size_hectares ?? 0;
+        $farmSize = $user->farm_size_m2 ?? 0;
         $lat = $user->farm_latitude;
         $lng = $user->farm_longitude;
         $today = now()->toDateString();
@@ -214,7 +214,7 @@ You are speaking with {$name}, who manages "{$farmName}" in {$location}.
 
 TODAY'S DATE: {$today}
 FARM PROFILE:
-- Size: {$farmSize} hectares
+- Size: {$farmSize} square meters
 - Crops: {$crops}
 - Soil type: {$soilType}
 - Irrigation: {$irrigation}
@@ -325,10 +325,10 @@ PROMPT;
         $lines = ['FARM FIELDS:'];
         foreach ($fields as $field) {
             $lines[] = sprintf(
-                '- %s: crop=%s, area=%sha, health=%s%%, moisture=%s%%, status=%s',
+                '- %s: crop=%s, area=%s m2, health=%s%%, moisture=%s%%, status=%s',
                 $field->name ?? 'Field',
                 $field->crop ?? 'n/a',
-                $field->area_hectares ?? 'n/a',
+                $field->area_m2 ?? 'n/a',
                 $field->health_percentage ?? 'n/a',
                 $field->moisture_percentage ?? 'n/a',
                 $field->status ?? 'active',

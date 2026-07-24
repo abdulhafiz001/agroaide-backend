@@ -22,7 +22,7 @@ class User extends Authenticatable
         'farm_location',
         'farm_latitude',
         'farm_longitude',
-        'farm_size_hectares',
+        'farm_size_m2',
         'crops',
         'experience_level',
         'soil_type',
@@ -47,7 +47,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'crops' => 'array',
             'notification_preferences' => 'array',
-            'farm_size_hectares' => 'float',
+            'farm_size_m2' => 'float',
             'farm_latitude' => 'float',
             'farm_longitude' => 'float',
         ];
@@ -81,5 +81,20 @@ class User extends Authenticatable
     public function farmImageAnalyses(): HasMany
     {
         return $this->hasMany(FarmImageAnalysis::class);
+    }
+
+    public function fieldTransactions(): HasMany
+    {
+        return $this->hasMany(FieldTransaction::class);
+    }
+
+    public function cropWatches(): HasMany
+    {
+        return $this->hasMany(CropWatch::class);
+    }
+
+    public function syncActionLogs(): HasMany
+    {
+        return $this->hasMany(SyncActionLog::class);
     }
 }

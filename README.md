@@ -1,89 +1,65 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# AgroAide API (Laravel)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Backend for the AgroAide mobile farm assistant: auth, farm records, weather, AI advisor, crop scanning, disease-outbreak clustering, and FCM notifications.
 
-## About Laravel
+## Stack
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- PHP 8.2+ / Laravel 12
+- Laravel Sanctum (API tokens)
+- MySQL (or SQLite for local/testing)
+- Open-Meteo, GitHub Models, Groq Whisper, optional PlantNet, Firebase FCM
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Quick start
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+```bash
+cp .env.example .env
+php artisan key:generate
+# configure DB_* and API keys in .env
+composer install
+php artisan migrate
+php artisan serve --host=0.0.0.0 --port=8000
+```
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
-
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-## Laravel Sponsors
-
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
-
-### Premium Partners
-
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-To start this laravel application i use: php artisan serve --host=0.0.0.0 --port=8000
-
-## Push notifications (FCM)
-
-See [../docs/FIREBASE_FCM_SETUP.md](../docs/FIREBASE_FCM_SETUP.md) for Firebase + EAS setup.
-
-Scheduler commands:
+For scheduled alerts (weather, tasks, outbreaks):
 
 ```bash
 php artisan schedule:work
-# or individually:
-php artisan agroaide:send-weather-alerts
-php artisan agroaide:send-daily-ai-insights
-php artisan agroaide:send-task-reminders
-php artisan agroaide:detect-outbreaks
 ```
 
-## Docker / Coolify
+## Environment setup (secrets)
 
-Production image (nginx + php-fpm + `schedule:work` via supervisord):
+Copy `.env.example` → `.env`. **Never commit** `.env` or service-account JSON.
+
+| Variable | Purpose |
+|----------|---------|
+| `APP_KEY` | Laravel encryption key |
+| `DB_*` | Database |
+| `GITHUB_MODELS_API_KEY` | LLM + vision (advisor, scan) |
+| `GROQ_API_KEY` | Voice transcription ([console.groq.com](https://console.groq.com/keys)) |
+| `PLANTNET_API_KEY` | Optional plant ID assist |
+| `FCM_PROJECT_ID` | Firebase project id |
+| `FCM_CREDENTIALS_PATH` | Path to Firebase service account JSON (gitignored) |
+| `MAIL_*` | Welcome / password-reset email |
+
+See also: [`docs/FIREBASE_FCM_SETUP.md`](../docs/FIREBASE_FCM_SETUP.md), [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+
+## Tests
 
 ```bash
-# Local boot test
-docker compose up --build
-curl http://localhost:8080/up
+php artisan test
 ```
 
-Coolify: point the app at this repo's `Dockerfile`, expose port **80**, attach a MySQL database, and set the env vars listed in the Docker summary (see chat / deploy notes). Mount `firebase-service-account.json` as a file secret and set `FCM_CREDENTIALS_PATH` to that absolute path.
+Focused suites: outbreak distance, auth API, scan history ownership.
 
+## Useful artisan commands
+
+```bash
+php artisan agroaide:detect-outbreaks
+php artisan agroaide:send-weather-alerts
+php artisan agroaide:send-task-reminders
+php artisan agroaide:test-outbreak-notification --email=you@example.com
+```
+
+## API health
+
+`GET /api/health` → `{ "ok": true }`

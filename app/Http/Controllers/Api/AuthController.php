@@ -31,7 +31,7 @@ class AuthController extends Controller
             'phoneNumber' => ['nullable', 'string', 'max:32'],
             'farmName' => ['nullable', 'string', 'max:255'],
             'farmLocation' => ['nullable', 'string', 'max:255'],
-            'farmSizeHectares' => ['nullable', 'numeric', 'min:0'],
+            'farmSizeM2' => ['nullable', 'numeric', 'min:0'],
             'crops' => ['nullable', 'array'],
             'crops.*' => ['string', 'max:100'],
             'experienceLevel' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
@@ -51,7 +51,7 @@ class AuthController extends Controller
             'farm_location' => $validated['farmLocation'] ?? null,
             'farm_latitude' => $validated['farmLatitude'] ?? null,
             'farm_longitude' => $validated['farmLongitude'] ?? null,
-            'farm_size_hectares' => $validated['farmSizeHectares'] ?? 0,
+            'farm_size_m2' => $validated['farmSizeM2'] ?? 0,
             'crops' => $validated['crops'] ?? [],
             'experience_level' => $validated['experienceLevel'] ?? 'beginner',
             'soil_type' => $validated['soilType'] ?? 'Loamy',
@@ -132,7 +132,7 @@ class AuthController extends Controller
             'farmLocation' => ['nullable', 'string', 'max:255'],
             'farmLatitude' => ['nullable', 'numeric', 'between:-90,90'],
             'farmLongitude' => ['nullable', 'numeric', 'between:-180,180'],
-            'farmSizeHectares' => ['nullable', 'numeric', 'min:0'],
+            'farmSizeM2' => ['nullable', 'numeric', 'min:0'],
             'preferredLanguage' => ['nullable', 'string', Rule::in(['en', 'ha', 'yo', 'pcm'])],
             'pushToken' => ['nullable', 'string', 'max:4096'],
             'notificationPreferences' => ['nullable', 'array'],
@@ -169,8 +169,8 @@ class AuthController extends Controller
         if (array_key_exists('farmLongitude', $validated)) {
             $updateData['farm_longitude'] = $validated['farmLongitude'];
         }
-        if (isset($validated['farmSizeHectares'])) {
-            $updateData['farm_size_hectares'] = $validated['farmSizeHectares'];
+        if (isset($validated['farmSizeM2'])) {
+            $updateData['farm_size_m2'] = $validated['farmSizeM2'];
         }
         if (isset($validated['crops'])) {
             $updateData['crops'] = $validated['crops'];
@@ -361,7 +361,7 @@ class AuthController extends Controller
             'phoneNumber' => $user->phone_number ?? '',
             'farmName' => $user->farm_name ?? 'My Farm',
             'farmLocation' => $user->farm_location ?? 'Unknown location',
-            'farmSizeHectares' => (float) ($user->farm_size_hectares ?? 0),
+            'farmSizeM2' => (float) ($user->farm_size_m2 ?? 0),
             'crops' => is_array($user->crops) ? $user->crops : [],
             'experienceLevel' => $user->experience_level ?? 'beginner',
             'soilType' => $user->soil_type ?? 'Loamy',

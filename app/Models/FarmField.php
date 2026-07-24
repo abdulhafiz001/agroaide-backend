@@ -15,7 +15,10 @@ class FarmField extends Model
         'user_id',
         'name',
         'crop',
-        'area_hectares',
+        'area_m2',
+        'boundary_geojson',
+        'boundary_updated_at',
+        'client_uuid',
         'health_percentage',
         'moisture_percentage',
         'planted_at',
@@ -25,7 +28,9 @@ class FarmField extends Model
     protected function casts(): array
     {
         return [
-            'area_hectares' => 'float',
+            'area_m2' => 'float',
+            'boundary_geojson' => 'array',
+            'boundary_updated_at' => 'datetime',
             'health_percentage' => 'integer',
             'moisture_percentage' => 'integer',
             'planted_at' => 'date',
@@ -40,6 +45,11 @@ class FarmField extends Model
     public function journalEntries(): HasMany
     {
         return $this->hasMany(JournalEntry::class);
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(FieldTransaction::class);
     }
 
     public function getDaysSincePlantingAttribute(): ?int
