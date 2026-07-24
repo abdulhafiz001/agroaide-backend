@@ -55,8 +55,10 @@ return [
 
     'fcm' => [
         'project_id' => env('FCM_PROJECT_ID'),
-        'credentials' => env('FCM_CREDENTIALS_PATH')
-            ? base_path(env('FCM_CREDENTIALS_PATH'))
+        // Absolute paths (e.g. /run/secrets/firebase.json) are used as-is for Coolify mounts.
+        // Relative paths are resolved from the app base path.
+        'credentials' => ($fcmPath = env('FCM_CREDENTIALS_PATH', 'firebase-service-account.json'))
+            ? (str_starts_with($fcmPath, '/') ? $fcmPath : base_path($fcmPath))
             : base_path('firebase-service-account.json'),
     ],
 

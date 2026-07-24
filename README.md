@@ -75,3 +75,15 @@ php artisan agroaide:send-task-reminders
 php artisan agroaide:detect-outbreaks
 ```
 
+## Docker / Coolify
+
+Production image (nginx + php-fpm + `schedule:work` via supervisord):
+
+```bash
+# Local boot test
+docker compose up --build
+curl http://localhost:8080/up
+```
+
+Coolify: point the app at this repo's `Dockerfile`, expose port **80**, attach a MySQL database, and set the env vars listed in the Docker summary (see chat / deploy notes). Mount `firebase-service-account.json` as a file secret and set `FCM_CREDENTIALS_PATH` to that absolute path.
+
