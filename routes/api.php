@@ -16,6 +16,11 @@ use Illuminate\Support\Facades\Route;
 // Quick connectivity check - no auth, no DB, returns immediately
 Route::get('/health', fn () => response()->json(['ok' => true, 'message' => 'AgroAide API is reachable']));
 
+Route::get('/farm/exports/{userId}/{file}', [EconomicsController::class, 'downloadExport'])
+    ->middleware('signed')
+    ->name('economics.export.download')
+    ->where(['userId' => '[0-9]+', 'file' => 'field-[A-Za-z0-9._-]+\.pdf']);
+
 // Debug: test GitHub Models (dev only, no auth)
 Route::get('/debug/github-models-test', function () {
     if (! app()->environment('local')) {

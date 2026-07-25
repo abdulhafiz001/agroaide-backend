@@ -223,36 +223,140 @@ class EconomicsController extends Controller
 
         $economics = json_decode($this->fieldEconomics($request, $fieldId)->getContent(), true);
 
-        return $this->exportPdf($field, $transactions, $economics);
+        return $this->exportPdf($field, $transactions, $economics, (int) $request->user()->id, $request);
     }
 
     /**
      * @param  \Illuminate\Support\Collection<int, FieldTransaction>  $transactions
      * @param  array<string, mixed>  $economics
      */
-    private function exportPdf(FarmField $field, $transactions, array $economics): JsonResponse
+    private function exportPdf(FarmField $field, $transactions, array $economics, int $userId, Request $request): JsonResponse
     {
         $html = $this->buildExportHtml($field, $transactions, $economics);
         $filename = sprintf('field-%d-economics-%s.pdf', $field->id, now()->format('Ymd'));
 
-        if (class_exists(\Barryvdh\DomPDF\Facade\Pdf::class)) {
-            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($html);
+        if (! class_exists(\Barryvdh\DomPDF\Facade\Pdf::class)) {
+            return response()->json([
+                'filename' => str_replace('.pdf', '.html', $filename),
+                'mimeType' => 'text/html;charset=utf-8',
+                'content' => base64_encode($html),
+                'encoding' => 'base64',
+                'note' => 'Dompdf not installed; returned HTML instead of PDF.',
+            ]);
+        }
+
+        try {
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)
+                ->setPaper('a4', 'portrait');
             $binary = $pdf->output();
+
+            // Avoid stuffing ~1MB+ base64 into JSON (nginx FastCGI buffers / mobile timeouts).
+            $storedName = sprintf('field-%d-%s-%s.pdf', $field->id, now()->format('YmdHis'), \Illuminate\Support\Str::random(12));
+            $storagePath = "exports/{$userId}/{$storedName}";
+            \Illuminate\Support\Facades\Storage::disk('local')->put($storagePath, $binary);
+
+            // Sign against the public host the client actually hit (not APP_URL=localhost).
+            $rootUrl = rtrim($request->getSchemeAndHttpHost(), '/');
+            $previousRoot = config('app.url');
+            \Illuminate\Support\Facades\URL::forceRootUrl($rootUrl);
+            try {
+                $downloadUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                    'economics.export.download',
+                    now()->addMinutes(30),
+                    ['userId' => $userId, 'file' => $storedName],
+                );
+            } finally {
+                \Illuminate\Support\Facades\URL::forceRootUrl($previousRoot ?: $rootUrl);
+            }
 
             return response()->json([
                 'filename' => $filename,
                 'mimeType' => 'application/pdf',
-                'content' => base64_encode($binary),
+                'downloadUrl' => $downloadUrl,
+                'encoding' => 'url',
             ]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not generate PDF report. Please try again.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
+    }
+
+    public function downloadExport(Request $request, int $userId, string $file): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        if (! preg_match('/^field-\d+-\d{14}-[A-Za-z0-9]+\.pdf$/', $file)) {
+            abort(404);
         }
 
-        // Fallback: HTML download when Dompdf is unavailable
-        return response()->json([
-            'filename' => str_replace('.pdf', '.html', $filename),
-            'mimeType' => 'text/html',
-            'content' => $html,
-            'note' => 'Dompdf not installed; returned HTML instead of PDF.',
-        ]);
+        $storagePath = "exports/{$userId}/{$file}";
+        if (! \Illuminate\Support\Facades\Storage::disk('local')->exists($storagePath)) {
+            abort(404);
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('local')->download(
+            $storagePath,
+            $file,
+            ['Content-Type' => 'application/pdf'],
+        );
+    }
+
+    /**
+     * Prefer the tiny pre-baked PDF logo (works without GD in Docker).
+     * Falls back to live resize when GD is available, otherwise skips the image.
+     */
+    private function pdfLogoHtml(): string
+    {
+        $compactPath = public_path('images/agroaideLogo-pdf.png');
+        if (is_file($compactPath) && filesize($compactPath) > 0 && filesize($compactPath) < 200_000) {
+            $png = (string) file_get_contents($compactPath);
+
+            return '<img class="logo" src="data:image/png;base64,'.base64_encode($png).'" alt="AgroAide" />';
+        }
+
+        $logoPath = public_path('images/agroaideLogo.png');
+        if (! is_file($logoPath) || ! function_exists('imagecreatefrompng')) {
+            return '';
+        }
+
+        try {
+            $source = @imagecreatefrompng($logoPath);
+            if ($source === false) {
+                return '';
+            }
+
+            $srcW = imagesx($source);
+            $srcH = imagesy($source);
+            $maxW = 140;
+            $dstW = min($maxW, max(1, $srcW));
+            $dstH = (int) max(1, round($srcH * ($dstW / $srcW)));
+
+            $resized = imagecreatetruecolor($dstW, $dstH);
+            imagealphablending($resized, false);
+            imagesavealpha($resized, true);
+            $transparent = imagecolorallocatealpha($resized, 0, 0, 0, 127);
+            imagefilledrectangle($resized, 0, 0, $dstW, $dstH, $transparent);
+            imagecopyresampled($resized, $source, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+
+            ob_start();
+            imagepng($resized, null, 6);
+            $png = ob_get_clean();
+
+            imagedestroy($source);
+            imagedestroy($resized);
+
+            if ($png === false || $png === '') {
+                return '';
+            }
+
+            return '<img class="logo" src="data:image/png;base64,'.base64_encode($png).'" alt="AgroAide" />';
+        } catch (\Throwable $e) {
+            report($e);
+
+            return '';
+        }
     }
 
     /**
@@ -272,13 +376,7 @@ class EconomicsController extends Controller
         $net = $this->e(number_format((float) ($economics['totals']['netProfit'] ?? 0), 2));
         $exportedAt = $this->e(now()->format('M j, Y g:i A'));
 
-        $logoHtml = '';
-        $logoPath = public_path('images/agroaideLogo.png');
-        if (is_file($logoPath)) {
-            $mime = 'image/png';
-            $base64 = base64_encode((string) file_get_contents($logoPath));
-            $logoHtml = '<img class="logo" src="data:'.$mime.';base64,'.$base64.'" alt="AgroAide" />';
-        }
+        $logoHtml = $this->pdfLogoHtml();
 
         $rows = '';
         foreach ($transactions as $t) {
