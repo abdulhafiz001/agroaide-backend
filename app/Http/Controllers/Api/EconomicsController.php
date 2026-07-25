@@ -232,10 +232,11 @@ class EconomicsController extends Controller
      */
     private function exportPdf(FarmField $field, $transactions, array $economics, int $userId, Request $request): JsonResponse
     {
-        $html = $this->buildExportHtml($field, $transactions, $economics);
         $filename = sprintf('field-%d-economics-%s.pdf', $field->id, now()->format('Ymd'));
 
         if (! class_exists(\Barryvdh\DomPDF\Facade\Pdf::class)) {
+            $html = $this->buildExportHtml($field, $transactions, $economics);
+
             return response()->json([
                 'filename' => str_replace('.pdf', '.html', $filename),
                 'mimeType' => 'text/html;charset=utf-8',
@@ -245,22 +246,53 @@ class EconomicsController extends Controller
             ]);
         }
 
-        try {
-            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)
-                ->setPaper('a4', 'portrait');
-            $binary = $pdf->output();
+        $binary = null;
+        $lastError = null;
 
-            // Avoid stuffing ~1MB+ base64 into JSON (nginx FastCGI buffers / mobile timeouts).
+        // Attempt 1: branded HTML. Attempt 2: ultra-simple HTML if DomPDF chokes.
+        foreach ([false, true] as $minimal) {
+            try {
+                $html = $minimal
+                    ? $this->buildMinimalExportHtml($field, $transactions, $economics)
+                    : $this->buildExportHtml($field, $transactions, $economics);
+
+                $binary = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)
+                    ->setPaper('a4', 'portrait')
+                    ->setOption('defaultFont', 'Helvetica')
+                    ->setOption('isRemoteEnabled', false)
+                    ->output();
+                break;
+            } catch (\Throwable $e) {
+                $lastError = $e;
+                report($e);
+            }
+        }
+
+        if ($binary === null) {
+            return response()->json([
+                'message' => 'Could not generate PDF report. Please try again.',
+                'error' => config('app.debug') && $lastError ? $lastError->getMessage() : null,
+            ], 500);
+        }
+
+        $payload = [
+            'filename' => $filename,
+            'mimeType' => 'application/pdf',
+            'content' => base64_encode($binary),
+            'encoding' => 'base64',
+        ];
+
+        // Optional signed URL — never fail the export if this part breaks (route cache / APP_URL).
+        try {
             $storedName = sprintf('field-%d-%s-%s.pdf', $field->id, now()->format('YmdHis'), \Illuminate\Support\Str::random(12));
             $storagePath = "exports/{$userId}/{$storedName}";
             \Illuminate\Support\Facades\Storage::disk('local')->put($storagePath, $binary);
 
-            // Sign against the public host the client actually hit (not APP_URL=localhost).
             $rootUrl = rtrim($request->getSchemeAndHttpHost(), '/');
             $previousRoot = config('app.url');
             \Illuminate\Support\Facades\URL::forceRootUrl($rootUrl);
             try {
-                $downloadUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                $payload['downloadUrl'] = \Illuminate\Support\Facades\URL::temporarySignedRoute(
                     'economics.export.download',
                     now()->addMinutes(30),
                     ['userId' => $userId, 'file' => $storedName],
@@ -268,21 +300,59 @@ class EconomicsController extends Controller
             } finally {
                 \Illuminate\Support\Facades\URL::forceRootUrl($previousRoot ?: $rootUrl);
             }
-
-            return response()->json([
-                'filename' => $filename,
-                'mimeType' => 'application/pdf',
-                'downloadUrl' => $downloadUrl,
-                'encoding' => 'url',
-            ]);
         } catch (\Throwable $e) {
             report($e);
-
-            return response()->json([
-                'message' => 'Could not generate PDF report. Please try again.',
-                'error' => config('app.debug') ? $e->getMessage() : null,
-            ], 500);
         }
+
+        return response()->json($payload);
+    }
+
+    /**
+     * DomPDF-safe minimal report (no logo, core fonts only).
+     *
+     * @param  \Illuminate\Support\Collection<int, FieldTransaction>  $transactions
+     * @param  array<string, mixed>  $economics
+     */
+    private function buildMinimalExportHtml(FarmField $field, $transactions, array $economics): string
+    {
+        $user = $field->user;
+        $farmName = $this->e((string) ($user?->farm_name ?: 'My Farm'));
+        $name = $this->e($field->name);
+        $crop = $this->e($field->crop);
+        $expense = $this->e(number_format((float) ($economics['totals']['expense'] ?? 0), 2));
+        $income = $this->e(number_format((float) ($economics['totals']['income'] ?? 0), 2));
+        $net = $this->e(number_format((float) ($economics['totals']['netProfit'] ?? 0), 2));
+
+        $rows = '';
+        foreach ($transactions as $t) {
+            $rows .= sprintf(
+                '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>',
+                $this->e($t->occurred_on?->toDateString() ?? ''),
+                $this->e($t->type),
+                $this->e((string) $t->category),
+                $this->e(number_format((float) $t->amount, 2)),
+            );
+        }
+        if ($rows === '') {
+            $rows = '<tr><td colspan="4">No transactions yet.</td></tr>';
+        }
+
+        return <<<HTML
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body{font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#111;}
+h1{font-size:18px;color:#1b4332;}
+table{width:100%;border-collapse:collapse;margin-top:12px;}
+th,td{border:1px solid #ccc;padding:6px;text-align:left;}
+th{background:#1b4332;color:#fff;}
+</style></head><body>
+<h1>AgroAide — {$name}</h1>
+<p>Farm: {$farmName} · Crop: {$crop}</p>
+<p>Expense: {$expense} · Income: {$income} · Net: {$net}</p>
+<table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th></tr></thead>
+<tbody>{$rows}</tbody></table>
+</body></html>
+HTML;
     }
 
     public function downloadExport(Request $request, int $userId, string $file): \Symfony\Component\HttpFoundation\StreamedResponse
@@ -419,7 +489,7 @@ class EconomicsController extends Controller
 <style>
   @page { margin: 28px; }
   body {
-    font-family: DejaVu Sans, sans-serif;
+    font-family: Helvetica, Arial, sans-serif;
     font-size: 11px;
     color: #1f2937;
     margin: 0;

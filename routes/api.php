@@ -73,6 +73,7 @@ Route::prefix('auth')->group(function (): void {
 
 Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/farm/overview', [FarmController::class, 'overview']);
+    Route::get('/farm/fields/{fieldId}', [FarmController::class, 'showField']);
     Route::post('/farm/fields', [FarmController::class, 'addField']);
     Route::put('/farm/fields/{fieldId}', [FarmController::class, 'updateField']);
     Route::delete('/farm/fields/{fieldId}', [FarmController::class, 'deleteField']);

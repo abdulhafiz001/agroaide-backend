@@ -89,6 +89,31 @@ class GeoAreaService
     }
 
     /**
+     * Build a square farm outline centered on a GPS point from area in m².
+     * Assumes a square plot (same convention as the ft side×side UI estimate).
+     *
+     * @return array<int, array{latitude: float, longitude: float}>
+     */
+    public function squarePolygonAround(float $latitude, float $longitude, float $areaM2): array
+    {
+        $area = $areaM2 > 0 ? $areaM2 : 1000.0; // fallback ~31.6m side so the map still shows something
+        $halfSide = sqrt($area) / 2.0;
+
+        $metersPerDegLat = 111_320.0;
+        $metersPerDegLng = 111_320.0 * max(abs(cos(deg2rad($latitude))), 0.01);
+
+        $dLat = $halfSide / $metersPerDegLat;
+        $dLng = $halfSide / $metersPerDegLng;
+
+        return [
+            ['latitude' => $latitude + $dLat, 'longitude' => $longitude - $dLng],
+            ['latitude' => $latitude + $dLat, 'longitude' => $longitude + $dLng],
+            ['latitude' => $latitude - $dLat, 'longitude' => $longitude + $dLng],
+            ['latitude' => $latitude - $dLat, 'longitude' => $longitude - $dLng],
+        ];
+    }
+
+    /**
      * @param  array{lat?: float, lng?: float, latitude?: float, longitude?: float}|array{0: float, 1: float}  $point
      * @return array{lat: float, lng: float}
      */

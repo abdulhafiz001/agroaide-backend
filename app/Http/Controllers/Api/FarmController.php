@@ -96,16 +96,18 @@ class FarmController extends Controller
                 ];
             })->values()->all();
 
-            $primaryPolygon = $polygons[0]['polygon'] ?? [
-                ['latitude' => $lat + 0.0003, 'longitude' => $lng - 0.0015],
-                ['latitude' => $lat + 0.0006, 'longitude' => $lng + 0.0015],
-                ['latitude' => $lat - 0.0007, 'longitude' => $lng + 0.002],
-                ['latitude' => $lat - 0.001, 'longitude' => $lng - 0.001],
-            ];
+            // Farm outline from registered size (square plot centered on farm GPS).
+            $farmPolygon = $this->geoAreaService->squarePolygonAround(
+                $lat,
+                $lng,
+                (float) ($user->farm_size_m2 ?? 0),
+            );
 
             $map = [
                 'center' => ['latitude' => $lat, 'longitude' => $lng],
-                'polygon' => $primaryPolygon,
+                'polygon' => $farmPolygon,
+                'farmName' => $user->farm_name ?? 'My Farm',
+                'farmSizeM2' => (float) ($user->farm_size_m2 ?? 0),
                 'fields' => $polygons,
             ];
         }
@@ -205,9 +207,87 @@ class FarmController extends Controller
                 'moisture' => $field->moisture_percentage,
                 'daysSincePlanting' => $field->days_since_planting,
                 'status' => $field->status,
+                'plantedAt' => $field->planted_at?->toIso8601String(),
                 'boundaryGeojson' => $field->boundary_geojson,
                 'hasMeasuredBoundary' => ! empty($field->boundary_geojson),
             ],
+        ]);
+    }
+
+    public function showField(Request $request, int $fieldId): JsonResponse
+    {
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        $eco = \App\Models\FieldTransaction::where('user_id', $request->user()->id)
+            ->where('farm_field_id', $field->id)
+            ->selectRaw("
+                COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) as total_expense,
+                COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as total_income
+            ")
+            ->first();
+
+        $totalExpense = round((float) ($eco->total_expense ?? 0), 2);
+        $totalIncome = round((float) ($eco->total_income ?? 0), 2);
+
+        $user = $request->user();
+        $boundaryRing = [];
+        if (! empty($field->boundary_geojson['coordinates'][0])) {
+            $boundaryRing = collect($field->boundary_geojson['coordinates'][0])->map(fn ($pair) => [
+                'latitude' => (float) ($pair[1] ?? 0),
+                'longitude' => (float) ($pair[0] ?? 0),
+            ])->all();
+        }
+
+        $farmPolygon = null;
+        $center = null;
+        if ($user->farm_latitude !== null && $user->farm_longitude !== null) {
+            $lat = (float) $user->farm_latitude;
+            $lng = (float) $user->farm_longitude;
+            $center = ['latitude' => $lat, 'longitude' => $lng];
+            $farmPolygon = $this->geoAreaService->squarePolygonAround(
+                $lat,
+                $lng,
+                (float) ($user->farm_size_m2 ?? 0),
+            );
+        } elseif (count($boundaryRing) >= 3) {
+            $center = $boundaryRing[0];
+        }
+
+        return response()->json([
+            'field' => [
+                'id' => (string) $field->id,
+                'name' => $field->name,
+                'crop' => $field->crop,
+                'area' => (float) $field->area_m2,
+                'health' => $field->health_percentage,
+                'moisture' => $field->moisture_percentage,
+                'daysSincePlanting' => $field->days_since_planting,
+                'status' => $field->status,
+                'plantedAt' => $field->planted_at?->toIso8601String(),
+                'boundaryGeojson' => $field->boundary_geojson,
+                'hasMeasuredBoundary' => ! empty($field->boundary_geojson),
+                'totalExpense' => $totalExpense,
+                'totalIncome' => $totalIncome,
+                'netProfit' => round($totalIncome - $totalExpense, 2),
+            ],
+            'farmSummary' => [
+                'farmName' => $user->farm_name ?? 'My Farm',
+                'farmLocation' => $user->farm_location ?? 'Unknown location',
+                'farmSizeM2' => (float) ($user->farm_size_m2 ?? 0),
+            ],
+            'map' => $center ? [
+                'center' => $center,
+                'polygon' => $farmPolygon ?? [],
+                'farmName' => $user->farm_name ?? 'My Farm',
+                'fields' => count($boundaryRing) >= 3 ? [[
+                    'fieldId' => (string) $field->id,
+                    'name' => $field->name,
+                    'crop' => $field->crop,
+                    'polygon' => $boundaryRing,
+                ]] : [],
+            ] : null,
         ]);
     }
 
