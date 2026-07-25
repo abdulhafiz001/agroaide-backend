@@ -65,6 +65,7 @@ class SendPlantingWindowAlerts extends Command
                 ],
                 [
                     'push' => true,
+                    'preference' => 'plantingWindowAlerts',
                     'dedupeMinutes' => 1440,
                     'dedupeKey' => 'watchId',
                 ],

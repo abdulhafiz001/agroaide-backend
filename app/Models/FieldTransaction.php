@@ -21,6 +21,8 @@ class FieldTransaction extends Model
         'unit',
         'occurred_on',
         'note',
+        'sale_item',
+        'category_other',
     ];
 
     protected function casts(): array

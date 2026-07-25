@@ -92,6 +92,8 @@ class SyncController extends Controller
                 'farmFieldId' => (string) $t->farm_field_id,
                 'type' => $t->type,
                 'category' => $t->category,
+                'categoryOther' => $t->category_other,
+                'saleItem' => $t->sale_item,
                 'amount' => (float) $t->amount,
                 'quantity' => $t->quantity !== null ? (float) $t->quantity : null,
                 'unit' => $t->unit,
@@ -429,6 +431,8 @@ class SyncController extends Controller
             'unit' => $payload['unit'] ?? null,
             'occurred_on' => $payload['occurredOn'] ?? now()->toDateString(),
             'note' => $payload['note'] ?? null,
+            'sale_item' => $payload['saleItem'] ?? null,
+            'category_other' => $payload['categoryOther'] ?? null,
         ]);
 
         return ['status' => 'applied', 'entityId' => (string) $tx->id];
@@ -449,7 +453,17 @@ class SyncController extends Controller
         }
 
         $update = [];
-        foreach (['type' => 'type', 'category' => 'category', 'amount' => 'amount', 'quantity' => 'quantity', 'unit' => 'unit', 'occurredOn' => 'occurred_on', 'note' => 'note'] as $from => $to) {
+        foreach ([
+            'type' => 'type',
+            'category' => 'category',
+            'amount' => 'amount',
+            'quantity' => 'quantity',
+            'unit' => 'unit',
+            'occurredOn' => 'occurred_on',
+            'note' => 'note',
+            'saleItem' => 'sale_item',
+            'categoryOther' => 'category_other',
+        ] as $from => $to) {
             if (array_key_exists($from, $payload)) {
                 $update[$to] = $payload[$from];
             }

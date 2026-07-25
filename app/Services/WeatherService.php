@@ -63,6 +63,7 @@ class WeatherService
                 'temperature_2m_max',
                 'temperature_2m_min',
                 'precipitation_sum',
+                'precipitation_probability_max',
                 'uv_index_max',
                 'sunrise',
                 'sunset',
@@ -155,6 +156,7 @@ class WeatherService
         $maxTemps = $daily['temperature_2m_max'] ?? [];
         $minTemps = $daily['temperature_2m_min'] ?? [];
         $precipitations = $daily['precipitation_sum'] ?? [];
+        $precipProbabilities = $daily['precipitation_probability_max'] ?? [];
         $weatherCodes = $daily['weather_code'] ?? [];
         $uvIndexes = $daily['uv_index_max'] ?? [];
 
@@ -168,7 +170,7 @@ class WeatherService
                 'high' => round($maxTemps[$i] ?? 30),
                 'low' => round($minTemps[$i] ?? 22),
                 'precipitation' => round(($precipitations[$i] ?? 0), 1),
-                'precipitationProbability' => $precipitations[$i] > 0 ? min(round(($precipitations[$i] / 20) * 100), 100) : 0,
+                'precipitationProbability' => (int) round($precipProbabilities[$i] ?? 0),
                 'condition' => $this->weatherCodeToCondition($code),
                 'icon' => $this->weatherCodeToIcon($code),
                 'uvIndex' => $uvIndexes[$i] ?? 0,

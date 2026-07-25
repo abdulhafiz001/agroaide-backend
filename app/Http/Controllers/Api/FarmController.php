@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\FarmField;
+use App\Models\FieldTransaction;
 use App\Models\JournalEntry;
 use App\Services\FarmImageAnalysisService;
 use App\Services\GeoAreaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class FarmController extends Controller
 {
@@ -22,19 +24,38 @@ class FarmController extends Controller
         /** @var \App\Models\User $user */
         $user = $request->user();
 
-        $fields = $user->farmFields()->orderBy('created_at', 'desc')->get()->map(fn (FarmField $f) => [
-            'id' => (string) $f->id,
-            'name' => $f->name,
-            'crop' => $f->crop,
-            'area' => (float) $f->area_m2,
-            'health' => $f->health_percentage,
-            'moisture' => $f->moisture_percentage,
-            'daysSincePlanting' => $f->days_since_planting,
-            'status' => $f->status,
-            'plantedAt' => $f->planted_at?->toIso8601String(),
-            'boundaryGeojson' => $f->boundary_geojson,
-            'hasMeasuredBoundary' => ! empty($f->boundary_geojson),
-        ]);
+        $economicsByField = FieldTransaction::where('user_id', $user->id)
+            ->select(
+                'farm_field_id',
+                DB::raw("COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) as total_expense"),
+                DB::raw("COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount ELSE 0 END), 0) as total_income"),
+            )
+            ->groupBy('farm_field_id')
+            ->get()
+            ->keyBy('farm_field_id');
+
+        $fields = $user->farmFields()->orderBy('created_at', 'desc')->get()->map(function (FarmField $f) use ($economicsByField) {
+            $eco = $economicsByField->get($f->id);
+            $totalExpense = round((float) ($eco->total_expense ?? 0), 2);
+            $totalIncome = round((float) ($eco->total_income ?? 0), 2);
+
+            return [
+                'id' => (string) $f->id,
+                'name' => $f->name,
+                'crop' => $f->crop,
+                'area' => (float) $f->area_m2,
+                'health' => $f->health_percentage,
+                'moisture' => $f->moisture_percentage,
+                'daysSincePlanting' => $f->days_since_planting,
+                'status' => $f->status,
+                'plantedAt' => $f->planted_at?->toIso8601String(),
+                'boundaryGeojson' => $f->boundary_geojson,
+                'hasMeasuredBoundary' => ! empty($f->boundary_geojson),
+                'totalExpense' => $totalExpense,
+                'totalIncome' => $totalIncome,
+                'netProfit' => round($totalIncome - $totalExpense, 2),
+            ];
+        });
 
         $journal = $user->journalEntries()
             ->with('farmField:id,name')
@@ -69,6 +90,7 @@ class FarmController extends Controller
                 return [
                     'fieldId' => (string) $field->id,
                     'name' => $field->name,
+                    'crop' => $field->crop,
                     'polygon' => $ring,
                     'geojson' => $field->boundary_geojson,
                 ];

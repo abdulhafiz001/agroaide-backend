@@ -66,6 +66,7 @@ class DashboardController extends Controller
                     'high' => $day['high'] ?? 30,
                     'low' => $day['low'] ?? 22,
                     'precipitation' => $day['precipitation'] ?? 0,
+                    'precipitationProbability' => (int) ($day['precipitationProbability'] ?? 0),
                     'icon' => $day['icon'] ?? 'cloud',
                     'condition' => $day['condition'] ?? 'Unknown',
                 ];

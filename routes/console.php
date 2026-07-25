@@ -13,3 +13,4 @@ Schedule::command('agroaide:send-task-reminders')->everyThirtyMinutes();
 Schedule::command('agroaide:send-weather-alerts')->everyTwoHours();
 Schedule::command('agroaide:send-daily-ai-insights')->dailyAt('06:30');
 Schedule::command('agroaide:send-planting-window-alerts')->daily();
+Schedule::command('agroaide:send-boundary-reminders')->daily();

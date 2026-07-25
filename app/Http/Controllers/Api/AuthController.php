@@ -140,6 +140,9 @@ class AuthController extends Controller
             'notificationPreferences.marketMovers' => ['nullable', 'boolean'],
             'notificationPreferences.aiInsights' => ['nullable', 'boolean'],
             'notificationPreferences.communityMentions' => ['nullable', 'boolean'],
+            'notificationPreferences.plantingWindowAlerts' => ['nullable', 'boolean'],
+            'notificationPreferences.fieldBoundaryReminders' => ['nullable', 'boolean'],
+            'notificationPreferences.diseaseOutbreak' => ['nullable', 'boolean'],
             'crops' => ['nullable', 'array'],
             'crops.*' => ['string', 'max:100'],
             'experienceLevel' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
@@ -192,7 +195,12 @@ class AuthController extends Controller
         }
         if (isset($validated['notificationPreferences'])) {
             $current = is_array($user->notification_preferences) ? $user->notification_preferences : [];
-            $updateData['notification_preferences'] = array_merge($current, $validated['notificationPreferences']);
+            $incoming = $validated['notificationPreferences'];
+            // diseaseOutbreak is always on — ignore client attempts to disable it
+            unset($incoming['diseaseOutbreak']);
+            $merged = array_merge($current, $incoming);
+            $merged['diseaseOutbreak'] = true;
+            $updateData['notification_preferences'] = $merged;
         }
 
         $user->update($updateData);
@@ -371,12 +379,37 @@ class AuthController extends Controller
             'farmLatitude' => $user->farm_latitude,
             'farmLongitude' => $user->farm_longitude,
             'preferredLanguage' => $user->preferred_language ?? 'en',
-            'notificationPreferences' => $user->notification_preferences ?? [
-                'severeWeather' => true,
-                'marketMovers' => true,
-                'aiInsights' => true,
-                'communityMentions' => false,
-            ],
+            'notificationPreferences' => $this->resolveNotificationPreferences($user),
+        ];
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function resolveNotificationPreferences(User $user): array
+    {
+        $defaults = [
+            'severeWeather' => true,
+            'marketMovers' => true,
+            'aiInsights' => true,
+            'communityMentions' => false,
+            'plantingWindowAlerts' => true,
+            'fieldBoundaryReminders' => true,
+            'diseaseOutbreak' => true,
+        ];
+
+        $prefs = is_array($user->notification_preferences) ? $user->notification_preferences : [];
+        $resolved = array_merge($defaults, $prefs);
+        $resolved['diseaseOutbreak'] = true;
+
+        return [
+            'severeWeather' => (bool) $resolved['severeWeather'],
+            'marketMovers' => (bool) $resolved['marketMovers'],
+            'aiInsights' => (bool) $resolved['aiInsights'],
+            'communityMentions' => (bool) $resolved['communityMentions'],
+            'plantingWindowAlerts' => (bool) $resolved['plantingWindowAlerts'],
+            'fieldBoundaryReminders' => (bool) $resolved['fieldBoundaryReminders'],
+            'diseaseOutbreak' => true,
         ];
     }
 }

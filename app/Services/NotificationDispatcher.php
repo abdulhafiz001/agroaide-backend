@@ -68,7 +68,14 @@ class NotificationDispatcher
             'marketMovers' => true,
             'aiInsights' => true,
             'communityMentions' => false,
+            'plantingWindowAlerts' => true,
+            'fieldBoundaryReminders' => true,
+            'diseaseOutbreak' => true,
         ];
+
+        if ($key === 'diseaseOutbreak') {
+            return true;
+        }
 
         $prefs = $user->notification_preferences;
         if (! is_array($prefs)) {
