@@ -14,7 +14,7 @@ class AnalyzeCropWatches extends Command
 {
     protected $signature = 'agroaide:analyze-crop-watches';
 
-    protected $description = 'Every ~6h: rule-based crop watch analysis + AI wording; notify users';
+    protected $description = 'Every ~6h: analyze NEW / waiting crop watches only (no repeat notifies)';
 
     public function __construct(
         private SeasonalCalendarService $seasonalCalendar,
@@ -25,14 +25,22 @@ class AnalyzeCropWatches extends Command
 
     public function handle(): int
     {
-        $watches = CropWatch::where('notify_when_planting_window', true)
+        // Only new watches (never analyzed) OR watches still waiting for a planting window.
+        // Already-notified outcomes (window_open / season_passed) are skipped to avoid repetition.
+        $watches = CropWatch::query()
+            ->where('notify_when_planting_window', true)
             ->where(function ($q) {
-                $q->whereNull('status')->orWhere('status', 'active')->orWhere('status', 'inactive');
+                $q->whereNull('last_analyzed_at')
+                    ->orWhere('last_analysis_status', 'waiting')
+                    ->orWhereNull('last_analysis_status');
+            })
+            ->where(function ($q) {
+                $q->whereNull('status')->orWhereIn('status', ['active', 'waiting']);
             })
             ->with('user')
             ->get();
 
-        $this->info('Analyzing '.$watches->count().' crop watch(es).');
+        $this->info('Analyzing '.$watches->count().' new/waiting crop watch(es).');
         $sent = 0;
 
         foreach ($watches as $watch) {
@@ -41,8 +49,8 @@ class AnalyzeCropWatches extends Command
                 continue;
             }
 
-            // Avoid spamming: only re-notify when status changes or once per day for open windows.
-            if ($watch->last_notified_on && $watch->last_notified_on->isToday()
+            // Hard stop: already notified for a terminal/open outcome — never spam again.
+            if ($watch->last_notified_on
                 && in_array($watch->last_analysis_status, ['window_open', 'season_passed', 'invalid'], true)) {
                 continue;
             }
@@ -53,7 +61,7 @@ class AnalyzeCropWatches extends Command
             $zoneLabel = config("seasonal_crops.zones.{$zone}.label", $zone);
 
             if (! $this->seasonalCalendar->isKnownCrop($watch->crop)
-                && ! $this->looksLikeValidCropViaAi($watch->crop, $user->preferred_language ?? 'en')) {
+                && ! $this->looksLikeValidCropViaAi($watch->crop)) {
                 $title = "Unknown crop: {$watch->crop}";
                 $message = $this->aiMessage($user, 'invalid', $watch->crop, $zoneLabel, null);
                 $notification = $this->dispatcher->notify(
@@ -83,6 +91,11 @@ class AnalyzeCropWatches extends Command
             $cropKey = $this->seasonalCalendar->normalizeCropName($watch->crop);
 
             if ($this->seasonalCalendar->seasonPassedThisYear($cropKey, $zone)) {
+                if ($watch->last_analysis_status === 'season_passed') {
+                    $watch->update(['last_analyzed_at' => now()]);
+                    continue;
+                }
+
                 $title = "Season passed: {$cropKey}";
                 $message = $this->aiMessage($user, 'season_passed', $cropKey, $zoneLabel, null);
                 $notification = $this->dispatcher->notify(
@@ -119,9 +132,16 @@ class AnalyzeCropWatches extends Command
             $best = $this->seasonalCalendar->bestPlantDate($cropKey, $zone);
             if (! $best) {
                 $watch->update([
+                    'status' => 'active',
                     'last_analysis_status' => 'waiting',
                     'last_analyzed_at' => now(),
                 ]);
+                continue;
+            }
+
+            // Window open / best date available — notify once only.
+            if ($watch->last_analysis_status === 'window_open' && $watch->last_notified_on) {
+                $watch->update(['last_analyzed_at' => now()]);
                 continue;
             }
 
@@ -143,7 +163,7 @@ class AnalyzeCropWatches extends Command
                 [
                     'push' => true,
                     'preference' => 'plantingWindowAlerts',
-                    'dedupeMinutes' => 1440,
+                    'dedupeMinutes' => 10080,
                     'dedupeKey' => 'watchId',
                 ],
             );
@@ -165,9 +185,8 @@ class AnalyzeCropWatches extends Command
         return self::SUCCESS;
     }
 
-    private function looksLikeValidCropViaAi(string $crop, string $lang): bool
+    private function looksLikeValidCropViaAi(string $crop): bool
     {
-        // Cheap heuristic first: reject empty / very short / digits-only.
         $trimmed = trim($crop);
         if (strlen($trimmed) < 3 || preg_match('/^\d+$/', $trimmed)) {
             return false;
@@ -182,7 +201,7 @@ class AnalyzeCropWatches extends Command
             $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
             $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
             $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
-            $response = Http::timeout(20)
+            $response = Http::timeout(12)
                 ->withHeaders([
                     'Authorization' => 'Bearer '.$apiKey,
                     'Accept' => 'application/vnd.github+json',
@@ -234,7 +253,7 @@ class AnalyzeCropWatches extends Command
             $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
             $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
             $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
-            $response = Http::timeout(25)
+            $response = Http::timeout(12)
                 ->withHeaders([
                     'Authorization' => 'Bearer '.$apiKey,
                     'Accept' => 'application/vnd.github+json',

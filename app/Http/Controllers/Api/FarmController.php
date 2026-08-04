@@ -333,20 +333,29 @@ class FarmController extends Controller
             ->firstOrFail();
 
         $validated = $request->validate([
-            'rowCm' => ['nullable', 'numeric', 'min:5', 'max:500'],
-            'intraCm' => ['nullable', 'numeric', 'min:5', 'max:500'],
+            'rowCm' => ['nullable', 'numeric', 'min:1', 'max:1000'],
+            'intraCm' => ['nullable', 'numeric', 'min:1', 'max:1000'],
             'spacingMode' => ['nullable', 'in:cm,steps'],
         ]);
 
-        $estimate = $this->inputEstimateService->estimate(
-            $field,
-            $request->user(),
-            isset($validated['rowCm']) ? (float) $validated['rowCm'] : null,
-            isset($validated['intraCm']) ? (float) $validated['intraCm'] : null,
-            $validated['spacingMode'] ?? 'cm',
-        );
+        try {
+            $estimate = $this->inputEstimateService->estimate(
+                $field,
+                $request->user(),
+                isset($validated['rowCm']) ? (float) $validated['rowCm'] : null,
+                isset($validated['intraCm']) ? (float) $validated['intraCm'] : null,
+                $validated['spacingMode'] ?? 'cm',
+            );
 
-        return response()->json(['estimate' => $estimate]);
+            return response()->json(['estimate' => $estimate]);
+        } catch (\Throwable $e) {
+            report($e);
+
+            return response()->json([
+                'message' => 'Could not calculate seed and fertilizer estimate.',
+                'error' => config('app.debug') ? $e->getMessage() : null,
+            ], 500);
+        }
     }
 
     public function updateBoundary(Request $request, int $fieldId): JsonResponse

@@ -73,9 +73,34 @@ class InputEstimateService
             'disclaimer' => 'Guide only — may not be 100% correct for your soil and variety.',
         ];
 
-        $numbers['aiSummary'] = $this->summarizeWithAi($user, $numbers);
+        // Numbers always return immediately. AI rewrite is optional and must not block Calculate.
+        $numbers['aiSummary'] = $this->buildFallbackSummary($user, $numbers);
+        try {
+            $ai = $this->summarizeWithAi($user, $numbers);
+            if (is_string($ai) && trim($ai) !== '') {
+                $numbers['aiSummary'] = $ai;
+            }
+        } catch (\Throwable $e) {
+            Log::warning('InputEstimate AI skipped', ['message' => $e->getMessage()]);
+        }
 
         return $numbers;
+    }
+
+    /**
+     * @param  array<string, mixed>  $numbers
+     */
+    private function buildFallbackSummary(User $user, array $numbers): string
+    {
+        $fertLines = collect($numbers['fertilizers'] ?? [])
+            ->map(fn ($f) => "{$f['name']}: {$f['kg']} kg (~{$f['bags50kg']} bags of 50kg)")
+            ->implode('; ');
+
+        $seedLine = $numbers['seedUnit'] === 'kg'
+            ? "Seed: about {$numbers['seedKg']} kg"
+            : 'Planting material: about '.($numbers['seedStands'] ?? $numbers['population']).' '.$numbers['seedUnit'];
+
+        return "For your {$numbers['areaM2']} m² {$numbers['crop']} field, plant about {$numbers['rowCm']} cm × {$numbers['intraCm']} cm apart (~{$numbers['population']} stands). {$seedLine}. Fertilizer: {$fertLines}. ".$numbers['disclaimer'];
     }
 
     /**
@@ -85,16 +110,7 @@ class InputEstimateService
     {
         $lang = $user->preferred_language ?? 'en';
         $langName = TranslationService::languageName($lang);
-
-        $fertLines = collect($numbers['fertilizers'] ?? [])
-            ->map(fn ($f) => "{$f['name']}: {$f['kg']} kg (~{$f['bags50kg']} bags of 50kg)")
-            ->implode('; ');
-
-        $seedLine = $numbers['seedUnit'] === 'kg'
-            ? "Seed: about {$numbers['seedKg']} kg"
-            : 'Planting material: about '.($numbers['seedStands'] ?? $numbers['population']).' '.$numbers['seedUnit'];
-
-        $fallback = "For your {$numbers['areaM2']} m² {$numbers['crop']} field, plant about {$numbers['rowCm']} cm × {$numbers['intraCm']} cm apart (~{$numbers['population']} stands). {$seedLine}. Fertilizer: {$fertLines}. ".$numbers['disclaimer'];
+        $fallback = $this->buildFallbackSummary($user, $numbers);
 
         $apiKey = trim(config('services.github_models.api_key', ''));
         if ($apiKey === '') {
@@ -106,36 +122,33 @@ class InputEstimateService
             ."Include the disclaimer that it is a guide and may not be 100% correct.\n\n"
             .json_encode($numbers, JSON_PRETTY_PRINT);
 
-        try {
-            $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-            $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-            $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+        $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
+        $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
+        $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
 
-            $response = Http::timeout(30)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.$apiKey,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => $apiVersion,
-                    'Content-Type' => 'application/json',
-                ])
-                ->post($endpoint, [
-                    'model' => $model,
-                    'messages' => [
-                        ['role' => 'system', 'content' => 'You write short agronomy summaries. Never change numeric quantities.'],
-                        ['role' => 'user', 'content' => $prompt],
-                    ],
-                    'max_tokens' => 280,
-                    'temperature' => 0.3,
-                ]);
+        $response = Http::timeout(3)
+            ->connectTimeout(2)
+            ->withHeaders([
+                'Authorization' => 'Bearer '.$apiKey,
+                'Accept' => 'application/vnd.github+json',
+                'X-GitHub-Api-Version' => $apiVersion,
+                'Content-Type' => 'application/json',
+            ])
+            ->post($endpoint, [
+                'model' => $model,
+                'messages' => [
+                    ['role' => 'system', 'content' => 'You write short agronomy summaries. Never change numeric quantities.'],
+                    ['role' => 'user', 'content' => $prompt],
+                ],
+                'max_tokens' => 280,
+                'temperature' => 0.3,
+            ]);
 
-            if ($response->successful()) {
-                $content = trim((string) ($response->json('choices.0.message.content') ?? ''));
-                if ($content !== '') {
-                    return $content;
-                }
+        if ($response->successful()) {
+            $content = trim((string) ($response->json('choices.0.message.content') ?? ''));
+            if ($content !== '') {
+                return $content;
             }
-        } catch (\Throwable $e) {
-            Log::warning('InputEstimate AI summary failed', ['message' => $e->getMessage()]);
         }
 
         return $fallback;
