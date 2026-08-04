@@ -77,6 +77,8 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::post('/farm/fields', [FarmController::class, 'addField']);
     Route::put('/farm/fields/{fieldId}', [FarmController::class, 'updateField']);
     Route::delete('/farm/fields/{fieldId}', [FarmController::class, 'deleteField']);
+    Route::delete('/farm/fields/{fieldId}/boundary', [FarmController::class, 'clearBoundary']);
+    Route::post('/farm/fields/{fieldId}/input-estimate', [FarmController::class, 'inputEstimate']);
     Route::put('/farm/fields/{fieldId}/boundary', [FarmController::class, 'updateBoundary']);
     Route::post('/farm/journal', [FarmController::class, 'addJournalEntry']);
     Route::put('/farm/journal/{entryId}', [FarmController::class, 'updateJournalEntry']);
@@ -104,6 +106,7 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/calendar/crop-watches', [CalendarController::class, 'listCropWatches']);
     Route::post('/calendar/crop-watches', [CalendarController::class, 'storeCropWatch']);
     Route::delete('/calendar/crop-watches/{id}', [CalendarController::class, 'destroyCropWatch']);
+    Route::post('/calendar/planting-reminders', [CalendarController::class, 'setPlantingReminder']);
 
     Route::post('/sync/delta', [SyncController::class, 'delta']);
     Route::get('/sync/pull', [SyncController::class, 'pull']);

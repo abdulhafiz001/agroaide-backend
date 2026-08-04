@@ -317,11 +317,13 @@ class EconomicsController extends Controller
     {
         $user = $field->user;
         $farmName = $this->e((string) ($user?->farm_name ?: 'My Farm'));
+        $farmLocation = $this->e((string) ($user?->farm_location ?: ''));
         $name = $this->e($field->name);
         $crop = $this->e($field->crop);
         $expense = $this->e(number_format((float) ($economics['totals']['expense'] ?? 0), 2));
         $income = $this->e(number_format((float) ($economics['totals']['income'] ?? 0), 2));
         $net = $this->e(number_format((float) ($economics['totals']['netProfit'] ?? 0), 2));
+        $logoHtml = $this->pdfLogoHtml();
 
         $rows = '';
         foreach ($transactions as $t) {
@@ -340,14 +342,28 @@ class EconomicsController extends Controller
         return <<<HTML
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
-body{font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#111;}
-h1{font-size:18px;color:#1b4332;}
+body{font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#111;margin:0;padding:0;}
+.header{border-bottom:3px solid #1b4332;padding-bottom:12px;margin-bottom:14px;}
+.logo{height:42px;width:auto;vertical-align:middle;margin-right:10px;}
+.brand{display:inline-block;vertical-align:middle;}
+.brand-name{font-size:20px;font-weight:bold;color:#1b4332;}
+.brand-tag{font-size:10px;color:#52796f;}
+h1{font-size:16px;color:#1b4332;margin:0 0 8px 0;}
 table{width:100%;border-collapse:collapse;margin-top:12px;}
 th,td{border:1px solid #ccc;padding:6px;text-align:left;}
 th{background:#1b4332;color:#fff;}
 </style></head><body>
-<h1>AgroAide — {$name}</h1>
-<p>Farm: {$farmName} · Crop: {$crop}</p>
+<div class="header">
+  {$logoHtml}
+  <div class="brand">
+    <div class="brand-name">AgroAide</div>
+    <div class="brand-tag">Field Economics Report</div>
+  </div>
+  <div style="margin-top:8px;font-size:11px;color:#374151;">
+    <strong>{$farmName}</strong>{$farmLocation}<br>Field: {$name} · Crop: {$crop}
+  </div>
+</div>
+<h1>{$name}</h1>
 <p>Expense: {$expense} · Income: {$income} · Net: {$net}</p>
 <table><thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th></tr></thead>
 <tbody>{$rows}</tbody></table>

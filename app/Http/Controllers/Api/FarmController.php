@@ -8,6 +8,7 @@ use App\Models\FieldTransaction;
 use App\Models\JournalEntry;
 use App\Services\FarmImageAnalysisService;
 use App\Services\GeoAreaService;
+use App\Services\InputEstimateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,7 @@ class FarmController extends Controller
     public function __construct(
         private FarmImageAnalysisService $imageAnalysisService,
         private GeoAreaService $geoAreaService,
+        private InputEstimateService $inputEstimateService,
     ) {}
 
     public function overview(Request $request): JsonResponse
@@ -299,6 +301,52 @@ class FarmController extends Controller
             ->delete();
 
         return response()->json(['message' => 'Field deleted successfully.']);
+    }
+
+    public function clearBoundary(Request $request, int $fieldId): JsonResponse
+    {
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        $field->update([
+            'boundary_geojson' => null,
+            'boundary_updated_at' => null,
+            'boundary_reminder_sent_at' => null,
+        ]);
+
+        return response()->json([
+            'message' => 'Field boundary removed. You can walk a new boundary anytime.',
+            'field' => [
+                'id' => (string) $field->id,
+                'name' => $field->name,
+                'hasMeasuredBoundary' => false,
+                'area' => (float) $field->area_m2,
+            ],
+        ]);
+    }
+
+    public function inputEstimate(Request $request, int $fieldId): JsonResponse
+    {
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'rowCm' => ['nullable', 'numeric', 'min:5', 'max:500'],
+            'intraCm' => ['nullable', 'numeric', 'min:5', 'max:500'],
+            'spacingMode' => ['nullable', 'in:cm,steps'],
+        ]);
+
+        $estimate = $this->inputEstimateService->estimate(
+            $field,
+            $request->user(),
+            isset($validated['rowCm']) ? (float) $validated['rowCm'] : null,
+            isset($validated['intraCm']) ? (float) $validated['intraCm'] : null,
+            $validated['spacingMode'] ?? 'cm',
+        );
+
+        return response()->json(['estimate' => $estimate]);
     }
 
     public function updateBoundary(Request $request, int $fieldId): JsonResponse

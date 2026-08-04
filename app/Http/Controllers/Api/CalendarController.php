@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
 use App\Models\CropWatch;
+use App\Models\PlantingReminder;
 use App\Services\SeasonalCalendarService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -45,13 +47,40 @@ class CalendarController extends Controller
                     'marked' => true,
                     'dotColor' => $row->done_count >= $row->task_count ? '#2eb873' : '#db9534',
                 ],
-            ]);
+            ])
+            ->all();
+
+        $reminders = PlantingReminder::where('user_id', $user->id)
+            ->whereDate('plant_on', '>=', now()->subDays(1))
+            ->orderBy('plant_on')
+            ->get();
+
+        foreach ($reminders as $reminder) {
+            $date = $reminder->plant_on->toDateString();
+            $markedDates[$date] = [
+                'marked' => true,
+                'dotColor' => '#3b82f6',
+                'plantingReminder' => true,
+            ];
+        }
 
         $dayTasks = $tasks->filter(fn ($t) => $t['scheduledDate'] === $selectedDate)->values();
+        $dayReminders = $reminders
+            ->filter(fn (PlantingReminder $r) => $r->plant_on->toDateString() === $selectedDate)
+            ->values()
+            ->map(fn (PlantingReminder $r) => [
+                'id' => (string) $r->id,
+                'crop' => $r->crop,
+                'plantOn' => $r->plant_on->toDateString(),
+                'kind' => 'planting_reminder',
+                'title' => "Plant {$r->crop}",
+                'description' => 'Planting reminder set from crop watch.',
+            ]);
 
         return response()->json([
             'tasks' => $tasks,
             'dayPlan' => $dayTasks,
+            'dayReminders' => $dayReminders,
             'markedDates' => $markedDates,
             'selectedDate' => $selectedDate,
         ]);
@@ -235,6 +264,67 @@ class CalendarController extends Controller
         return response()->json(['message' => 'Crop watch removed.']);
     }
 
+    public function setPlantingReminder(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'notificationId' => ['nullable', 'integer'],
+            'watchId' => ['nullable', 'integer'],
+            'crop' => ['required', 'string', 'max:100'],
+            'plantOn' => ['required', 'date'],
+        ]);
+
+        $plantOn = Carbon::parse($validated['plantOn'])->startOfDay();
+        $remind2d = $plantOn->copy()->subDays(2)->setTime(8, 0);
+        $remindOn = $plantOn->copy()->setTime(7, 0);
+
+        $watchId = $validated['watchId'] ?? null;
+        if ($watchId) {
+            $owns = CropWatch::where('user_id', $request->user()->id)->where('id', $watchId)->exists();
+            if (! $owns) {
+                $watchId = null;
+            }
+        }
+
+        $reminder = PlantingReminder::updateOrCreate(
+            [
+                'user_id' => $request->user()->id,
+                'crop' => $validated['crop'],
+                'plant_on' => $plantOn->toDateString(),
+            ],
+            [
+                'crop_watch_id' => $watchId,
+                'notification_id' => $validated['notificationId'] ?? null,
+                'remind_2d_at' => $remind2d,
+                'remind_on_at' => $remindOn,
+                'local_scheduled' => false,
+            ],
+        );
+
+        return response()->json([
+            'reminder' => [
+                'id' => (string) $reminder->id,
+                'crop' => $reminder->crop,
+                'plantOn' => $reminder->plant_on->toDateString(),
+                'remind2dAt' => $reminder->remind_2d_at->toIso8601String(),
+                'remindOnAt' => $reminder->remind_on_at->toIso8601String(),
+            ],
+            'localSchedule' => [
+                [
+                    'id' => 'planting-2d-'.$reminder->id,
+                    'title' => "Plant {$reminder->crop} in 2 days",
+                    'body' => "Prepare for planting {$reminder->crop} on {$reminder->plant_on->toDateString()}.",
+                    'triggerAt' => $reminder->remind_2d_at->toIso8601String(),
+                ],
+                [
+                    'id' => 'planting-day-'.$reminder->id,
+                    'title' => "Plant {$reminder->crop} today",
+                    'body' => "Today is planting day for {$reminder->crop}.",
+                    'triggerAt' => $reminder->remind_on_at->toIso8601String(),
+                ],
+            ],
+        ], 201);
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -244,6 +334,9 @@ class CalendarController extends Controller
             'id' => (string) $w->id,
             'crop' => $w->crop,
             'notifyWhenPlantingWindow' => (bool) $w->notify_when_planting_window,
+            'status' => $w->status ?? 'active',
+            'bestPlantDate' => $w->best_plant_date?->toDateString(),
+            'lastAnalysisStatus' => $w->last_analysis_status,
             'lastNotifiedOn' => $w->last_notified_on?->toDateString(),
             'createdAt' => $w->created_at?->toIso8601String(),
         ];

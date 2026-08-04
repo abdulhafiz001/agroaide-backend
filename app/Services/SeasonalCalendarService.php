@@ -183,6 +183,64 @@ class SeasonalCalendarService
         return ucfirst(strtolower($trimmed));
     }
 
+    public function isKnownCrop(string $crop): bool
+    {
+        $key = $this->normalizeCropName($crop);
+        $crops = config('seasonal_crops.crops', []);
+
+        return isset($crops[$key]);
+    }
+
+    /**
+     * True when all planting months for this crop/zone in the current calendar year
+     * are strictly before the current month (season finished for this year).
+     */
+    public function seasonPassedThisYear(string $crop, string $zone, CarbonInterface|string|null $date = null): bool
+    {
+        $date = $date instanceof CarbonInterface ? $date : Carbon::parse($date ?? now());
+        $month = (int) $date->format('n');
+        $cropKey = $this->normalizeCropName($crop);
+        $months = config("seasonal_crops.crops.{$cropKey}.plantingMonths.{$zone}", []);
+        if ($months === []) {
+            return false;
+        }
+
+        $maxMonth = max($months);
+
+        return $month > $maxMonth;
+    }
+
+    /**
+     * Best planting date suggestion: if window active → today (or 1st of current month if mid-month prefer next week).
+     * If upcoming months remain → 1st day of next planting month this year.
+     * If season passed → null.
+     */
+    public function bestPlantDate(string $crop, string $zone, CarbonInterface|string|null $date = null): ?Carbon
+    {
+        $date = $date instanceof CarbonInterface ? $date->copy() : Carbon::parse($date ?? now());
+        $cropKey = $this->normalizeCropName($crop);
+        $months = config("seasonal_crops.crops.{$cropKey}.plantingMonths.{$zone}", []);
+        if ($months === []) {
+            return null;
+        }
+
+        sort($months);
+        $year = (int) $date->format('Y');
+        $month = (int) $date->format('n');
+
+        if ($this->plantingWindowActive($cropKey, $zone, $date)) {
+            return $date->copy()->startOfDay();
+        }
+
+        foreach ($months as $m) {
+            if ($m > $month) {
+                return Carbon::create($year, $m, 1)->startOfDay();
+            }
+        }
+
+        return null;
+    }
+
     /**
      * @return list<string>
      */
