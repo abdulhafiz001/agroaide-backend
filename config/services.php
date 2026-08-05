@@ -62,4 +62,9 @@ return [
             : base_path('firebase-service-account.json'),
     ],
 
+    'marketeye' => [
+        'api_key' => env('MARKETEYE_API_KEY'),
+        'base_url' => env('MARKETEYE_BASE_URL', 'https://marketeye.ahzcode.sbs/api/v1/public'),
+    ],
+
 ];

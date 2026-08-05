@@ -120,7 +120,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/dashboard/snapshot', [DashboardController::class, 'snapshot']);
     Route::get('/dashboard/ai-insights', [DashboardController::class, 'aiInsights']);
     Route::get('/market/intel', [MarketController::class, 'intel']);
-    Route::get('/market/resources', [MarketController::class, 'resources']);
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);

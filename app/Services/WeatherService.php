@@ -15,11 +15,25 @@ class WeatherService
      */
     public function getWeather(float $latitude, float $longitude): array
     {
-        $cacheKey = "weather_{$latitude}_{$longitude}";
+        // Round coords so tiny GPS jitter doesn't bust cache unnecessarily.
+        $latKey = round($latitude, 3);
+        $lngKey = round($longitude, 3);
+        $cacheKey = "weather_{$latKey}_{$lngKey}";
 
-        return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($latitude, $longitude) {
-            return $this->fetchFromApi($latitude, $longitude);
-        });
+        $cached = Cache::get($cacheKey);
+        if (is_array($cached) && empty($cached['_fallback'])) {
+            return $cached;
+        }
+
+        $fresh = $this->fetchFromApi($latitude, $longitude);
+
+        // Never cache fallback/unavailable responses — that was locking farmers
+        // into "Weather data unavailable" for a full hour after a blip.
+        if (empty($fresh['_fallback'])) {
+            Cache::put($cacheKey, $fresh, self::CACHE_TTL);
+        }
+
+        return $fresh;
     }
 
     /**
@@ -34,12 +48,13 @@ class WeatherService
             'soilHealth' => $data['soilHealth'] ?? [],
             'forecast' => $data['forecast'] ?? [],
             'alerts' => $data['alerts'] ?? [],
+            'isLive' => empty($data['_fallback']),
         ];
     }
 
     private function fetchFromApi(float $latitude, float $longitude): array
     {
-        $response = Http::timeout(8)->get(self::BASE_URL, [
+        $response = Http::timeout(15)->connectTimeout(5)->get(self::BASE_URL, [
             'latitude' => $latitude,
             'longitude' => $longitude,
             'current' => implode(',', [
@@ -77,6 +92,9 @@ class WeatherService
         }
 
         $json = $response->json();
+        if (! is_array($json) || empty($json['current'])) {
+            return $this->fallbackData();
+        }
 
         return [
             'current' => $this->parseCurrent($json),
@@ -84,6 +102,7 @@ class WeatherService
             'forecast' => $this->parseDailyForecast($json),
             'hourly' => $this->parseHourly($json),
             'alerts' => $this->generateAlerts($json),
+            '_fallback' => false,
         ];
     }
 
@@ -384,31 +403,18 @@ class WeatherService
     private function fallbackData(): array
     {
         return [
-            'current' => [
-                'temperature' => 28,
-                'humidity' => 65,
-                'apparentTemperature' => 30,
-                'precipitation' => 0,
-                'weatherCode' => 1,
-                'windSpeed' => 8,
-                'isDay' => true,
-                'condition' => 'Partly cloudy',
-                'icon' => 'cloud-sun',
-            ],
-            'soilHealth' => [
-                ['label' => 'Moisture', 'value' => 55, 'unit' => '%', 'icon' => 'droplets', 'tone' => 'info'],
-                ['label' => 'Soil temp', 'value' => 26, 'unit' => '°C', 'icon' => 'thermometer', 'tone' => 'neutral'],
-                ['label' => 'Humidity', 'value' => 65, 'unit' => '%', 'icon' => 'cloud', 'tone' => 'info'],
-                ['label' => 'Wind', 'value' => 8, 'unit' => 'km/h', 'icon' => 'wind', 'tone' => 'neutral'],
-            ],
+            '_fallback' => true,
+            'current' => [],
+            'soilHealth' => [],
             'forecast' => [],
             'hourly' => [],
             'alerts' => [[
                 'severity' => 'Low',
                 'title' => 'Weather data unavailable',
-                'advice' => 'Unable to fetch live weather data. Please check your internet connection.',
+                'advice' => 'Unable to fetch live weather data right now. Pull to refresh in a moment.',
                 'gradient' => ['#95a5a6', '#7f8c8d'],
             ]],
         ];
     }
 }
+

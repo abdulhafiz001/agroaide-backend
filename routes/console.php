@@ -16,3 +16,4 @@ Schedule::command('agroaide:send-planting-window-alerts')->daily();
 Schedule::command('agroaide:analyze-crop-watches')->everySixHours();
 Schedule::command('agroaide:send-planting-reminders')->everyThirtyMinutes();
 Schedule::command('agroaide:send-boundary-reminders')->daily();
+Schedule::command('agroaide:sync-market-prices')->dailyAt('05:15');
