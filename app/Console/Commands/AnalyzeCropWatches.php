@@ -58,12 +58,19 @@ class AnalyzeCropWatches extends Command
             $lat = $user->farm_latitude !== null ? (float) $user->farm_latitude : null;
             $lng = $user->farm_longitude !== null ? (float) $user->farm_longitude : null;
             $zone = $this->seasonalCalendar->resolveZone($lat, $lng, $user->farm_location);
-            $zoneLabel = config("seasonal_crops.zones.{$zone}.label", $zone);
+            $placeLabel = $this->seasonalCalendar->locationPhrase($user, $zone);
 
-            if (! $this->seasonalCalendar->isKnownCrop($watch->crop)
+            // Normalize aliases early (Beans → Cowpea) so known crops never hit the AI invalid path.
+            $cropKey = $this->seasonalCalendar->normalizeCropName($watch->crop);
+            if ($cropKey !== $watch->crop) {
+                $watch->crop = $cropKey;
+                $watch->save();
+            }
+
+            if (! $this->seasonalCalendar->isKnownCrop($cropKey)
                 && ! $this->looksLikeValidCropViaAi($watch->crop)) {
                 $title = "Unknown crop: {$watch->crop}";
-                $message = $this->aiMessage($user, 'invalid', $watch->crop, $zoneLabel, null);
+                $message = $this->aiMessage($user, 'invalid', $watch->crop, $placeLabel, null);
                 $notification = $this->dispatcher->notify(
                     $user,
                     'crop_watch_invalid',
@@ -73,6 +80,7 @@ class AnalyzeCropWatches extends Command
                         'crop' => $watch->crop,
                         'watchId' => $watch->id,
                         'analysis' => 'invalid',
+                        'location' => $placeLabel,
                     ],
                     [
                         'push' => true,
@@ -88,8 +96,6 @@ class AnalyzeCropWatches extends Command
                 continue;
             }
 
-            $cropKey = $this->seasonalCalendar->normalizeCropName($watch->crop);
-
             if ($this->seasonalCalendar->seasonPassedThisYear($cropKey, $zone)) {
                 if ($watch->last_analysis_status === 'season_passed') {
                     $watch->update(['last_analyzed_at' => now()]);
@@ -97,7 +103,7 @@ class AnalyzeCropWatches extends Command
                 }
 
                 $title = "Season passed: {$cropKey}";
-                $message = $this->aiMessage($user, 'season_passed', $cropKey, $zoneLabel, null);
+                $message = $this->aiMessage($user, 'season_passed', $cropKey, $placeLabel, null);
                 $notification = $this->dispatcher->notify(
                     $user,
                     'crop_watch_season_passed',
@@ -108,6 +114,7 @@ class AnalyzeCropWatches extends Command
                         'watchId' => $watch->id,
                         'analysis' => 'season_passed',
                         'canSetReminder' => false,
+                        'location' => $placeLabel,
                     ],
                     [
                         'push' => true,
@@ -141,12 +148,15 @@ class AnalyzeCropWatches extends Command
 
             // Window open / best date available — notify once only.
             if ($watch->last_analysis_status === 'window_open' && $watch->last_notified_on) {
-                $watch->update(['last_analyzed_at' => now()]);
+                $watch->update([
+                    'best_plant_date' => $best->toDateString(),
+                    'last_analyzed_at' => now(),
+                ]);
                 continue;
             }
 
             $title = "Planting time: {$cropKey}";
-            $message = $this->aiMessage($user, 'window_open', $cropKey, $zoneLabel, $best->toDateString());
+            $message = $this->aiMessage($user, 'window_open', $cropKey, $placeLabel, $best->toDateString());
             $notification = $this->dispatcher->notify(
                 $user,
                 'crop_watch_planting',
@@ -159,6 +169,7 @@ class AnalyzeCropWatches extends Command
                     'bestPlantDate' => $best->toDateString(),
                     'canSetReminder' => true,
                     'zone' => $zone,
+                    'location' => $placeLabel,
                 ],
                 [
                     'push' => true,
@@ -170,6 +181,7 @@ class AnalyzeCropWatches extends Command
 
             $watch->update([
                 'status' => 'active',
+                'crop' => $cropKey,
                 'best_plant_date' => $best->toDateString(),
                 'last_analysis_status' => 'window_open',
                 'last_analyzed_at' => now(),
@@ -230,16 +242,16 @@ class AnalyzeCropWatches extends Command
         }
     }
 
-    private function aiMessage($user, string $kind, string $crop, string $zoneLabel, ?string $bestDate): string
+    private function aiMessage($user, string $kind, string $crop, string $placeLabel, ?string $bestDate): string
     {
         $lang = $user->preferred_language ?? 'en';
         $langName = TranslationService::languageName($lang);
         $fallback = match ($kind) {
             'invalid' => "\"{$crop}\" does not look like a valid farm crop, so we removed it from your watch list.",
-            'season_passed' => "The planting season for {$crop} in your {$zoneLabel} zone has already passed for this year. We kept it on your list for next year.",
+            'season_passed' => "The planting season for {$crop} around {$placeLabel} has already passed for this year. We kept it on your list for next year.",
             default => $bestDate
-                ? "Good time for {$crop} in {$zoneLabel}. Best planting date: {$bestDate}. You can set a reminder."
-                : "It is a good window to plant {$crop} in {$zoneLabel}.",
+                ? "Good time to plant {$crop} around {$placeLabel}. Best planting date: {$bestDate}. You can set a reminder."
+                : "It is a good window to plant {$crop} around {$placeLabel}.",
         };
 
         $apiKey = trim(config('services.github_models.api_key', ''));
@@ -247,7 +259,9 @@ class AnalyzeCropWatches extends Command
             return $fallback;
         }
 
-        $prompt = "Write 2 short sentences for a Nigerian farmer in {$langName}. Kind={$kind}. Crop={$crop}. Zone={$zoneLabel}. BestDate={$bestDate}. Do not invent other crops.";
+        $prompt = "Write 2 short sentences for a Nigerian farmer in {$langName}. Kind={$kind}. Crop={$crop}. "
+            ."Farmer location (be specific, use this place name): {$placeLabel}. BestDate={$bestDate}. "
+            .'Mention the place name so they know the app knows where they farm. Do not invent other crops.';
 
         try {
             $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));

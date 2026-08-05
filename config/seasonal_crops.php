@@ -9,6 +9,21 @@
  * - sudan_sahel: lat >= 11
  */
 return [
+    /**
+     * Common farmer names → canonical crop keys in `crops` below.
+     * Fixes watches like "Beans" being treated as unknown (canonical: Cowpea).
+     */
+    'aliases' => [
+        'Beans' => 'Cowpea',
+        'Bean' => 'Cowpea',
+        'Black-eyed pea' => 'Cowpea',
+        'Black eyed pea' => 'Cowpea',
+        'Tomatoes' => 'Tomato',
+        'Corn' => 'Maize',
+        'Sweet potato' => 'Yam',
+        'Garri' => 'Cassava',
+    ],
+
     'zones' => [
         'humid_forest' => [
             'label' => 'Humid Forest',

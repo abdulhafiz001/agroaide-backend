@@ -49,9 +49,10 @@ class SendPlantingWindowAlerts extends Command
                 continue;
             }
 
-            $zoneLabel = config("seasonal_crops.zones.{$zone}.label", $zone);
-            $title = "Planting window: {$watch->crop}";
-            $message = "It's a good time to plant {$watch->crop} in your {$zoneLabel} zone.";
+            $cropKey = $this->seasonalCalendar->normalizeCropName($watch->crop);
+            $placeLabel = $this->seasonalCalendar->locationPhrase($user, $zone);
+            $title = "Planting window: {$cropKey}";
+            $message = "It's a good time to plant {$cropKey} around {$placeLabel}.";
 
             $notification = $this->dispatcher->notify(
                 $user,
@@ -59,9 +60,10 @@ class SendPlantingWindowAlerts extends Command
                 $title,
                 $message,
                 [
-                    'crop' => $watch->crop,
+                    'crop' => $cropKey,
                     'zone' => $zone,
                     'watchId' => $watch->id,
+                    'location' => $placeLabel,
                 ],
                 [
                     'push' => true,

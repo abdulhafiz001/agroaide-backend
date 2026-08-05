@@ -173,6 +173,18 @@ class SeasonalCalendarService
     public function normalizeCropName(string $crop): string
     {
         $trimmed = trim($crop);
+        if ($trimmed === '') {
+            return $trimmed;
+        }
+
+        $aliases = config('seasonal_crops.aliases', []);
+        foreach ($aliases as $alias => $canonical) {
+            if (strcasecmp((string) $alias, $trimmed) === 0) {
+                $trimmed = (string) $canonical;
+                break;
+            }
+        }
+
         $crops = config('seasonal_crops.crops', []);
         foreach (array_keys($crops) as $name) {
             if (strcasecmp($name, $trimmed) === 0) {
@@ -180,7 +192,14 @@ class SeasonalCalendarService
             }
         }
 
-        return ucfirst(strtolower($trimmed));
+        // Fuzzy: "Rice local" → Rice, "Maize (white)" → Maize
+        foreach (array_keys($crops) as $name) {
+            if (str_contains(strtolower($trimmed), strtolower($name))) {
+                return $name;
+            }
+        }
+
+        return ucwords(strtolower($trimmed));
     }
 
     public function isKnownCrop(string $crop): bool
@@ -189,6 +208,24 @@ class SeasonalCalendarService
         $crops = config('seasonal_crops.crops', []);
 
         return isset($crops[$key]);
+    }
+
+    /**
+     * Human place line for notifications: farm area + agro zone.
+     * e.g. "Abuja, FCT (Guinea Savanna zone)"
+     */
+    public function locationPhrase(User $user, string $zone): string
+    {
+        $zoneLabel = config("seasonal_crops.zones.{$zone}.label", $zone);
+        $place = trim((string) ($user->farm_location ?? ''));
+        if ($place === '') {
+            $place = trim((string) ($user->farm_name ?? ''));
+        }
+        if ($place === '') {
+            return "your {$zoneLabel} zone";
+        }
+
+        return "{$place} ({$zoneLabel} zone)";
     }
 
     /**

@@ -64,6 +64,25 @@ class CalendarController extends Controller
             ];
         }
 
+        // Analyzed crop watches → mark best plant dates on the calendar (green).
+        $watches = CropWatch::where('user_id', $user->id)
+            ->whereNotNull('best_plant_date')
+            ->whereIn('last_analysis_status', ['window_open', 'waiting'])
+            ->get();
+
+        foreach ($watches as $watch) {
+            $date = $watch->best_plant_date?->toDateString();
+            if (! $date) {
+                continue;
+            }
+            $markedDates[$date] = [
+                'marked' => true,
+                'dotColor' => '#166534',
+                'cropWatch' => true,
+                'crop' => $watch->crop,
+            ];
+        }
+
         $dayTasks = $tasks->filter(fn ($t) => $t['scheduledDate'] === $selectedDate)->values();
         $dayReminders = $reminders
             ->filter(fn (PlantingReminder $r) => $r->plant_on->toDateString() === $selectedDate)
@@ -77,10 +96,23 @@ class CalendarController extends Controller
                 'description' => 'Planting reminder set from crop watch.',
             ]);
 
+        $dayWatchPlantings = $watches
+            ->filter(fn (CropWatch $w) => $w->best_plant_date?->toDateString() === $selectedDate)
+            ->values()
+            ->map(fn (CropWatch $w) => [
+                'id' => 'watch-'.$w->id,
+                'crop' => $w->crop,
+                'plantOn' => $w->best_plant_date?->toDateString(),
+                'kind' => 'crop_watch_plant',
+                'title' => "Plant {$w->crop}",
+                'description' => 'Suggested planting date from your crop watch analysis.',
+                'status' => $w->last_analysis_status,
+            ]);
+
         return response()->json([
             'tasks' => $tasks,
             'dayPlan' => $dayTasks,
-            'dayReminders' => $dayReminders,
+            'dayReminders' => $dayReminders->concat($dayWatchPlantings)->values(),
             'markedDates' => $markedDates,
             'selectedDate' => $selectedDate,
         ]);
