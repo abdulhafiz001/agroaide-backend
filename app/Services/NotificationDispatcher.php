@@ -65,9 +65,7 @@ class NotificationDispatcher
     {
         $defaults = [
             'severeWeather' => true,
-            'marketMovers' => true,
             'aiInsights' => true,
-            'communityMentions' => false,
             'plantingWindowAlerts' => true,
             'fieldBoundaryReminders' => true,
             'diseaseOutbreak' => true,

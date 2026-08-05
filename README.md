@@ -39,6 +39,8 @@ Copy `.env.example` → `.env`. **Never commit** `.env` or service-account JSON.
 | `PLANTNET_API_KEY` | Optional plant ID assist |
 | `FCM_PROJECT_ID` | Firebase project id |
 | `FCM_CREDENTIALS_PATH` | Path to Firebase service account JSON (gitignored) |
+| `MARKETEYE_API_KEY` | Crowd-verified market prices (backend only) |
+| `MARKETEYE_BASE_URL` | Default `https://marketeye.ahzcode.sbs/api/v1/public` |
 | `MAIL_*` | Welcome / password-reset email |
 
 See also: [`docs/FIREBASE_FCM_SETUP.md`](../docs/FIREBASE_FCM_SETUP.md), [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).

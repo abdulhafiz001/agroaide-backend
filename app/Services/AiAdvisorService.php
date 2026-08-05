@@ -120,39 +120,6 @@ class AiAdvisorService
         return array_slice($suggestions, 0, 4);
     }
 
-    /**
-     * Estimate market prices for given crops using AI.
-     */
-    public function estimateMarketPrices(User $user, array $crops): array
-    {
-        $cacheKey = "market_prices_{$user->id}_".date('Y-m-d');
-
-        return Cache::remember($cacheKey, 86400, function () use ($user, $crops) {
-            $cropsStr = implode(', ', $crops);
-            $location = $user->farm_location ?? 'Nigeria';
-
-            $prompt = "You are a Nigerian agricultural market analyst. Give me current estimated market prices for these crops in Nigeria: {$cropsStr}. The farmer is located in {$location}. For each crop, provide: commodity name, estimated price per ton in Nigerian Naira (NGN), the nearest major market, and whether the price trend is 'up', 'down', or 'stable' compared to last month. Also provide 2 brief market highlights. Return ONLY valid JSON in this exact format, no markdown, no explanation: {\"prices\": [{\"commodity\": \"name\", \"pricePerTon\": 150000, \"location\": \"market name\", \"trend\": \"up\"}], \"highlights\": [\"highlight 1\", \"highlight 2\"]}";
-
-            $messages = [
-                ['role' => 'system', 'content' => 'You are a Nigerian agricultural market analyst. Always respond with valid JSON only, no markdown formatting.'],
-                ['role' => 'user', 'content' => $prompt],
-            ];
-
-            $reply = $this->callGithubModels($messages);
-
-            $cleaned = preg_replace('/```json\s*|\s*```/', '', $reply);
-            $cleaned = trim($cleaned);
-
-            $parsed = json_decode($cleaned, true);
-
-            if (json_last_error() === JSON_ERROR_NONE && isset($parsed['prices'])) {
-                return $parsed;
-            }
-
-            return $this->fallbackMarketPrices($crops);
-        });
-    }
-
     private function generateDailyInsight(User $user): array
     {
         $systemPrompt = $this->buildSystemPrompt($user);
@@ -507,34 +474,4 @@ PROMPT;
         }
     }
 
-    private function fallbackMarketPrices(array $crops): array
-    {
-        $prices = [];
-        $basePrices = [
-            'maize' => 220000, 'rice' => 450000, 'cassava' => 120000,
-            'tomatoes' => 350000, 'yam' => 180000, 'beans' => 380000,
-            'millet' => 200000, 'sorghum' => 190000, 'groundnut' => 320000,
-            'pepper' => 400000, 'onion' => 280000, 'potato' => 250000,
-        ];
-        $markets = ['Mile 12, Lagos', 'Dawanau, Kano', 'Onitsha Market', 'Bodija, Ibadan', 'Wuse Market, Abuja'];
-
-        foreach ($crops as $crop) {
-            $lower = strtolower(trim($crop));
-            $price = $basePrices[$lower] ?? 200000;
-            $prices[] = [
-                'commodity' => ucfirst($crop),
-                'pricePerTon' => $price,
-                'location' => $markets[array_rand($markets)],
-                'trend' => ['up', 'down', 'stable'][array_rand(['up', 'down', 'stable'])],
-            ];
-        }
-
-        return [
-            'prices' => $prices,
-            'highlights' => [
-                'Market prices are estimated based on recent trends.',
-                'Visit local markets for the most accurate pricing.',
-            ],
-        ];
-    }
 }

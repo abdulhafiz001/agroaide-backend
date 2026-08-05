@@ -137,9 +137,7 @@ class AuthController extends Controller
             'pushToken' => ['nullable', 'string', 'max:4096'],
             'notificationPreferences' => ['nullable', 'array'],
             'notificationPreferences.severeWeather' => ['nullable', 'boolean'],
-            'notificationPreferences.marketMovers' => ['nullable', 'boolean'],
             'notificationPreferences.aiInsights' => ['nullable', 'boolean'],
-            'notificationPreferences.communityMentions' => ['nullable', 'boolean'],
             'notificationPreferences.plantingWindowAlerts' => ['nullable', 'boolean'],
             'notificationPreferences.fieldBoundaryReminders' => ['nullable', 'boolean'],
             'notificationPreferences.diseaseOutbreak' => ['nullable', 'boolean'],
@@ -390,9 +388,7 @@ class AuthController extends Controller
     {
         $defaults = [
             'severeWeather' => true,
-            'marketMovers' => true,
             'aiInsights' => true,
-            'communityMentions' => false,
             'plantingWindowAlerts' => true,
             'fieldBoundaryReminders' => true,
             'diseaseOutbreak' => true,
@@ -404,9 +400,7 @@ class AuthController extends Controller
 
         return [
             'severeWeather' => (bool) $resolved['severeWeather'],
-            'marketMovers' => (bool) $resolved['marketMovers'],
             'aiInsights' => (bool) $resolved['aiInsights'],
-            'communityMentions' => (bool) $resolved['communityMentions'],
             'plantingWindowAlerts' => (bool) $resolved['plantingWindowAlerts'],
             'fieldBoundaryReminders' => (bool) $resolved['fieldBoundaryReminders'],
             'diseaseOutbreak' => true,
