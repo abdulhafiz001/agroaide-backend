@@ -124,7 +124,7 @@ class FarmImageAnalysisService
             'processingState' => $a->processing_state,
             'verificationState' => $a->verification_state,
             'normalizedConfidence' => $a->normalized_confidence,
-            'provisional' => ! in_array($a->verification_state, ['auto_verified', 'expert_verified'], true),
+            'provisional' => in_array($a->verification_state, ['needs_retake', 'disputed'], true),
             'outbreakEligible' => (bool) $a->outbreak_eligible,
             'safeErrorCode' => $a->safe_error_code,
             // Served via authenticated API so private-disk images work on devices

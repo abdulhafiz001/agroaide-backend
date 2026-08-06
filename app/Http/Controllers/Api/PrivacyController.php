@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\FarmImageAnalysis;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -47,10 +48,22 @@ class PrivacyController extends Controller
     public function deleteScan(Request $request, int $scanId): JsonResponse
     {
         $scan = FarmImageAnalysis::where('user_id', $request->user()->id)->findOrFail($scanId);
-        $this->deleteScanFile($scan->image_path);
-        $scan->delete();
+        $imagePath = $scan->image_path;
 
-        return response()->json(['message' => 'Scan deleted.']);
+        DB::transaction(function () use ($scan): void {
+            // Related feedback / reviews cascade, but delete explicitly for clarity.
+            DB::table('scan_feedback')->where('farm_image_analysis_id', $scan->id)->delete();
+            DB::table('scan_review_history')->where('farm_image_analysis_id', $scan->id)->delete();
+            DB::table('system_job_runs')
+                ->where('reference_type', FarmImageAnalysis::class)
+                ->where('reference_id', $scan->id)
+                ->delete();
+            $scan->delete();
+        });
+
+        $this->deleteScanFile($imagePath);
+
+        return response()->json(['message' => 'Scan and image deleted.']);
     }
 
     public function clearAdvisorHistory(Request $request): JsonResponse

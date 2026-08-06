@@ -7,18 +7,27 @@ use PHPUnit\Framework\TestCase;
 
 class ScanVerificationServiceTest extends TestCase
 {
-    public function test_exact_confidence_boundaries_match_the_approved_policy(): void
+    public function test_initial_state_thresholds(): void
     {
         $service = new ScanVerificationService;
 
-        $this->assertSame('needs_retake', $service->initialState(0.5999, true));
+        $this->assertSame('needs_retake', $service->initialState(0.34, true));
         $this->assertSame('pending_review', $service->initialState(0.60, true));
         $this->assertSame('pending_review', $service->initialState(0.8499, true));
         $this->assertSame('auto_verified', $service->initialState(0.85, true));
         $this->assertSame('pending_review', $service->initialState(0.99, false));
     }
 
-    public function test_only_approved_transitions_are_legal(): void
+    public function test_research_backed_scans_skip_expert_wait(): void
+    {
+        $service = new ScanVerificationService;
+
+        $this->assertSame('auto_verified', $service->initialState(0.55, true, true));
+        $this->assertSame('auto_verified', $service->initialState(0.90, false, true));
+        $this->assertSame('needs_retake', $service->initialState(0.20, true, true));
+    }
+
+    public function test_legal_transitions(): void
     {
         $service = new ScanVerificationService;
 

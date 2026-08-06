@@ -19,11 +19,21 @@ class ScanVerificationService
         'disputed' => ['pending_review', 'expert_verified', 'expert_rejected'],
     ];
 
-    public function initialState(float $confidence, bool $canonicalAndValid): string
+    /**
+     * @param  bool  $researchBacked  Kindwise (or similar) research ID — farmers should not wait for expert review.
+     */
+    public function initialState(float $confidence, bool $canonicalAndValid, bool $researchBacked = false): string
     {
-        if ($confidence < 0.60) {
+        if ($confidence < 0.35) {
             return 'needs_retake';
         }
+
+        // Research-backed crop.health IDs are shown as complete to farmers.
+        // Staff can still review disputes / incorrect feedback later.
+        if ($researchBacked) {
+            return 'auto_verified';
+        }
+
         if ($confidence < 0.85 || ! $canonicalAndValid) {
             return 'pending_review';
         }

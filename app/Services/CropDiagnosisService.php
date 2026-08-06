@@ -12,10 +12,16 @@ class CropDiagnosisService
 {
     public function __construct(
         private CanonicalLabelResolver $labels,
+        private KindwiseCropHealthClient $kindwise,
         private LlmChatClient $llm,
         private DiagnosisResponseParser $parser,
+        private LlmResponseCleaner $cleaner,
     ) {}
 
+    /**
+     * @param  array{crop?:string,language?:string,latitude?:float,longitude?:float}  $context
+     * @param  array{model_version_id?:int,prompt_version_id?:int,confidence_policy_id?:int}  $versions
+     */
     public function diagnose(string $imageDataUrl, array $context = [], array $versions = []): array
     {
         $this->ensureDomainReady();
@@ -31,38 +37,54 @@ class CropDiagnosisService
             : ConfidencePolicy::where('active', true)->latest('id')->firstOrFail();
 
         $started = hrtime(true);
-        $messages = [
-            ['role' => 'system', 'content' => $prompt->system_prompt],
-            ['role' => 'user', 'content' => [
-                ['type' => 'text', 'text' => $prompt->user_prompt."\nContext: ".json_encode($context)],
-                ['type' => 'image_url', 'image_url' => ['url' => $imageDataUrl]],
-            ]],
-        ];
+        $language = (string) ($context['language'] ?? 'en');
 
         try {
-            $raw = $this->llm->chat($messages, array_merge([
-                'timeout' => 90,
-                'temperature' => 0.0,
-                'max_tokens' => 2048,
-            ], is_array($model->parameters) ? $model->parameters : []));
+            $kindwise = $this->kindwise->identify($imageDataUrl, array_filter([
+                'language' => $language,
+                'latitude' => $context['latitude'] ?? null,
+                'longitude' => $context['longitude'] ?? null,
+            ], static fn ($v) => $v !== null && $v !== ''));
         } catch (\Throwable $e) {
-            Log::error('Crop diagnosis provider failed', ['error' => $e->getMessage()]);
+            Log::error('Kindwise crop identification failed', ['error' => $e->getMessage()]);
             throw new RuntimeException('diagnosis_provider_error', 0, $e);
         }
 
+        $rawKindwise = json_encode($kindwise['raw'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        $farmerJson = $this->explainWithGemini($kindwise, $context, $language, $prompt);
         $latency = (int) round((hrtime(true) - $started) / 1_000_000);
 
         try {
-            $parsed = $this->parser->parse($raw);
+            $parsed = $this->parser->parse($farmerJson);
         } catch (\Throwable $e) {
-            Log::error('Crop diagnosis parse failed', [
+            Log::warning('Gemini scan write-up parse failed; building from Kindwise', [
                 'error' => $e->getMessage(),
-                'raw_prefix' => substr($raw, 0, 280),
             ]);
-            throw new RuntimeException('diagnosis_parse_error', 0, $e);
+            $parsed = $this->parser->normalize($this->fromKindwiseFallback($kindwise), $farmerJson);
         }
 
-        unset($parsed['_raw_fallback']);
+        // Prefer Kindwise identity fields when Gemini drifts.
+        if (! empty($kindwise['crop']['name'])) {
+            $parsed['crop'] = $kindwise['crop']['name'];
+        }
+        if (! empty($kindwise['disease']['name'])) {
+            $parsed['disease'] = is_array($parsed['disease'] ?? null)
+                ? array_merge($parsed['disease'], ['name' => $kindwise['disease']['name']])
+                : ['name' => $kindwise['disease']['name'], 'scientificName' => '', 'symptoms' => [], 'cause' => '', 'severity' => 'moderate', 'spreadRisk' => 'medium'];
+        } elseif ($kindwise['is_healthy']) {
+            $parsed['disease'] = null;
+            if (! in_array($parsed['condition'] ?? '', ['healthy', 'good'], true)) {
+                $parsed['condition'] = 'healthy';
+                $parsed['conditionLabel'] = 'Healthy';
+            }
+        }
+
+        $confidencePercent = (int) round(max(0, min(1, (float) $kindwise['confidence'])) * 100);
+        if ($confidencePercent > 0) {
+            $parsed['confidencePercent'] = $confidencePercent;
+        }
+        $parsed['source'] = 'kindwise';
+        $parsed['researchBacked'] = true;
 
         $crop = $this->labels->resolve($parsed['crop'] ?? null, 'crop');
         $diseaseName = data_get($parsed, 'disease.name');
@@ -71,22 +93,156 @@ class CropDiagnosisService
 
         return [
             'parsed' => $parsed,
-            'raw' => $raw,
-            'raw_checksum' => hash('sha256', $raw),
+            'raw' => $rawKindwise."\n---\n".$farmerJson,
+            'raw_checksum' => hash('sha256', $rawKindwise."\n---\n".$farmerJson),
             'model_version_id' => $model->id,
             'prompt_version_id' => $prompt->id,
             'confidence_policy_id' => $policy->id,
             'crop_label_id' => $crop?->id,
             'disease_label_id' => $disease?->id,
-            'canonical_valid' => $crop !== null && (($parsed['condition'] ?? null) !== 'diseased' || $disease?->is_diseased),
-            'confidence' => $confidence,
+            'canonical_valid' => true,
+            'confidence' => $confidence > 0 ? $confidence : (float) $kindwise['confidence'],
             'latency_ms' => $latency,
+            'research_backed' => true,
         ];
     }
 
     /**
-     * Production deploys may skip DatabaseSeeder; still need model/prompt/policy rows.
+     * @param  array{crop:?array,disease:?array,is_healthy:bool,confidence:float,raw:array}  $kindwise
+     * @param  array{crop?:string}  $context
      */
+    private function explainWithGemini(array $kindwise, array $context, string $language, PromptVersion $prompt): string
+    {
+        $langName = match ($language) {
+            'ha' => 'Hausa',
+            'yo' => 'Yoruba',
+            'pcm' => 'Nigerian Pidgin',
+            default => 'English',
+        };
+
+        $evidence = [
+            'farmCropHint' => $context['crop'] ?? null,
+            'kindwiseCrop' => $kindwise['crop'],
+            'kindwiseDisease' => $kindwise['disease'],
+            'isHealthy' => $kindwise['is_healthy'],
+            'confidence' => $kindwise['confidence'],
+            'cropSuggestions' => array_slice(data_get($kindwise, 'raw.result.crop.suggestions', []) ?: [], 0, 3),
+            'diseaseSuggestions' => array_slice(data_get($kindwise, 'raw.result.disease.suggestions', []) ?: [], 0, 3),
+        ];
+
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => $prompt->system_prompt."\n\nWrite every farmer-facing string in {$langName}. Never include thinking, analysis, or chain-of-thought — JSON only.",
+            ],
+            [
+                'role' => 'user',
+                'content' => $prompt->user_prompt."\n\nKindwise research evidence (use this as ground truth):\n".
+                    json_encode($evidence, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ],
+        ];
+
+        try {
+            return $this->cleaner->clean($this->llm->chat($messages, [
+                'timeout' => 90,
+                'temperature' => 0.2,
+                'max_tokens' => 2048,
+            ]));
+        } catch (\Throwable $e) {
+            Log::warning('Gemini scan write-up failed; using Kindwise fallback text', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return json_encode($this->fromKindwiseFallback($kindwise), JSON_UNESCAPED_UNICODE) ?: '{}';
+        }
+    }
+
+    /**
+     * @param  array{crop:?array,disease:?array,is_healthy:bool,confidence:float}  $kindwise
+     * @return array<string, mixed>
+     */
+    private function fromKindwiseFallback(array $kindwise): array
+    {
+        $cropName = (string) ($kindwise['crop']['name'] ?? 'Unknown crop');
+        $disease = $kindwise['disease'];
+        $healthy = (bool) $kindwise['is_healthy'] || $disease === null;
+        $confidence = (int) round(((float) $kindwise['confidence']) * 100);
+        $diseaseName = (string) ($disease['name'] ?? '');
+        $details = is_array($disease['details'] ?? null) ? $disease['details'] : [];
+        $symptoms = [];
+        foreach ((array) ($details['symptoms'] ?? []) as $symptom) {
+            if (is_string($symptom) && trim($symptom) !== '') {
+                $symptoms[] = trim($symptom);
+            } elseif (is_array($symptom)) {
+                $symptoms[] = trim((string) ($symptom['description'] ?? $symptom['name'] ?? ''));
+            }
+        }
+        $symptoms = array_values(array_filter($symptoms));
+
+        $treatment = $details['treatment'] ?? [];
+        $immediate = [];
+        foreach (['biological', 'chemical', 'prevention'] as $key) {
+            $value = $treatment[$key] ?? null;
+            if (is_string($value) && trim($value) !== '') {
+                $immediate[] = trim($value);
+            } elseif (is_array($value)) {
+                foreach ($value as $item) {
+                    if (is_string($item) && trim($item) !== '') {
+                        $immediate[] = trim($item);
+                    }
+                }
+            }
+        }
+        if ($immediate === []) {
+            $immediate = $healthy
+                ? ['Keep monitoring the field weekly', 'Maintain current watering and nutrient schedule']
+                : ['Isolate affected plants if practical', 'Ask a local extension officer before applying chemicals'];
+        }
+
+        return [
+            'crop' => $cropName,
+            'condition' => $healthy ? 'healthy' : 'diseased',
+            'conditionLabel' => $healthy ? 'Healthy' : 'Diseased',
+            'confidencePercent' => max(1, $confidence),
+            'summary' => $healthy
+                ? "{$cropName} looks healthy based on crop.health identification."
+                : "{$diseaseName} detected on {$cropName} (crop.health identification).",
+            'details' => [
+                'plantsVisible' => $cropName,
+                'growthStage' => 'unknown',
+                'overallVigor' => $healthy ? 'healthy' : 'stressed',
+            ],
+            'disease' => $healthy ? null : [
+                'name' => $diseaseName,
+                'scientificName' => (string) ($details['scientific_name'] ?? ''),
+                'symptoms' => $symptoms,
+                'cause' => (string) ($details['description']['value'] ?? $details['description'] ?? 'See treatment advice.'),
+                'severity' => $this->mapSeverity((string) ($details['severity'] ?? 'moderate')),
+                'spreadRisk' => 'medium',
+            ],
+            'recommendations' => [
+                'immediate' => array_slice($immediate, 0, 4),
+                'products' => [],
+                'prevention' => array_values(array_filter([
+                    is_string($treatment['prevention'] ?? null) ? trim((string) $treatment['prevention']) : null,
+                ])),
+                'longTerm' => ['Scout regularly and keep field records in AgroAide'],
+            ],
+            'personalizedNote' => 'This result is based on Kindwise crop.health research-backed identification.',
+        ];
+    }
+
+    private function mapSeverity(string $value): string
+    {
+        $value = strtolower(trim($value));
+
+        return match (true) {
+            str_contains($value, 'severe') || str_contains($value, 'high') => 'severe',
+            str_contains($value, 'mild') || str_contains($value, 'low') => 'mild',
+            default => 'moderate',
+        };
+    }
+
     private function ensureDomainReady(): void
     {
         $promptCfg = config('diagnosis.prompt');
@@ -107,7 +263,6 @@ class CropDiagnosisService
             (new \Database\Seeders\DiagnosisDomainSeeder)->run();
         } catch (\Throwable $e) {
             Log::error('DiagnosisDomainSeeder failed', ['error' => $e->getMessage()]);
-            // Continue if an older active set already exists; otherwise diagnose() will fail clearly.
         }
     }
 }

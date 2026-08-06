@@ -46,7 +46,7 @@ class AiAdvisorService
             ];
         }
 
-        $reply = $this->askLlm($messages);
+        $reply = app(LlmResponseCleaner::class)->clean($this->askLlm($messages));
 
         AdvisorConversation::create([
             'user_id' => $user->id,
@@ -212,14 +212,15 @@ CRITICAL RULES:
 8. For Nigerian farming, consider local seasons, markets, and practices.
 9. Never invent pesticide dosages or medical/legal advice. If unsure about non-weather facts, say so honestly.
 10. Prefer decisions tied to today's tasks, field health, recent crop scans, and the 7-day forecast when relevant.
-11. When the farmer asks about a scan, reference the latest matching scan findings. Any scan not marked auto_verified or expert_verified is provisional: explicitly call it provisional and recommend retake/expert review before treatment or outbreak conclusions.
-12. RESPONSE DEPTH ({$depth}): {$depthInstruction}
-13. RISK STYLE ({$risk}): {$riskInstruction}
+11. When the farmer asks about a scan, reference the latest matching scan findings. Kindwise crop.health scans marked research-backed / auto_verified can be treated as completed results — do not tell the farmer to wait for expert review. Only call a result provisional if verification is needs_retake or disputed.
+12. Never reveal chain-of-thought, hidden analysis, or "thinking" steps. Reply with clear farmer-facing advice only.
+13. RESPONSE DEPTH ({$depth}): {$depthInstruction}
+14. RISK STYLE ({$risk}): {$riskInstruction}
 PROMPT;
 
         if ($lang !== 'en') {
             $langName = TranslationService::languageName($lang);
-            $prompt .= "\n\nLANGUAGE: The farmer prefers {$langName}. They may write in {$langName} or English. ALWAYS respond in {$langName}. Keep language natural and farmer-friendly.";
+            $prompt .= "\n\nLANGUAGE: The farmer prefers {$langName}. They may write in {$langName} or English. ALWAYS respond entirely in {$langName}. Keep language natural, warm, and farmer-friendly. Do not mix in English except for product/scientific names when needed.";
         }
 
         return $prompt;
@@ -376,7 +377,7 @@ PROMPT;
             return "RECENT CROP SCANS:\n- No crop scans yet.\n";
         }
 
-        $lines = ['RECENT CROP SCANS (verified results may guide decisions; provisional results are not ground truth):'];
+        $lines = ['RECENT CROP SCANS (Kindwise research-backed / auto_verified results are completed; only needs_retake or disputed are provisional):'];
         foreach ($scans as $scan) {
             $analysis = is_array($scan->result_json) ? $scan->result_json : [];
             $date = optional($scan->created_at)?->toDateString() ?? 'n/a';
@@ -391,7 +392,10 @@ PROMPT;
             }
             $immediateText = $immediate ? implode('; ', $immediate) : 'n/a';
             $verification = $scan->verification_state ?? 'legacy_ineligible';
-            $certainty = in_array($verification, ['auto_verified', 'expert_verified'], true) ? 'verified' : 'PROVISIONAL';
+            $certainty = in_array($verification, ['auto_verified', 'expert_verified'], true)
+                || ! empty($analysis['researchBacked'])
+                ? 'completed'
+                : (in_array($verification, ['needs_retake', 'disputed'], true) ? 'PROVISIONAL' : 'completed');
 
             $lines[] = sprintf(
                 '- Scan #%s on %s | status=%s (%s) | field=%s (%s) | condition=%s | disease=%s | summary=%s | immediate=%s',

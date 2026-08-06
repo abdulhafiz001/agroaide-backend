@@ -91,6 +91,10 @@ class MediaPayloadValidator
         if (substr($bytes, 4, 4) === 'ftyp') {
             return ['audio/mp4', 'm4a'];
         }
+        // 3GP family (common on Android recorders)
+        if (str_starts_with($bytes, "\x00\x00\x00") && str_contains(substr($bytes, 0, 16), '3gp')) {
+            return ['audio/3gpp', '3gp'];
+        }
         if (str_starts_with($bytes, 'ID3') || (strlen($bytes) > 2 && ord($bytes[0]) === 0xFF && (ord($bytes[1]) & 0xE0) === 0xE0)) {
             return ['audio/mpeg', 'mp3'];
         }
@@ -100,9 +104,29 @@ class MediaPayloadValidator
 
     private function compatibleAudioMime(string $declared, string $detected): bool
     {
-        $aliases = ['audio/x-wav' => 'audio/wav', 'audio/mp4a-latm' => 'audio/mp4', 'video/webm' => 'audio/webm'];
+        $aliases = [
+            'audio/x-wav' => 'audio/wav',
+            'audio/mp4a-latm' => 'audio/mp4',
+            'audio/m4a' => 'audio/mp4',
+            'audio/x-m4a' => 'audio/mp4',
+            'audio/aac' => 'audio/mp4',
+            'audio/mp4' => 'audio/mp4',
+            'video/mp4' => 'audio/mp4',
+            'video/webm' => 'audio/webm',
+            'audio/3gpp' => 'audio/3gpp',
+            'audio/3gp' => 'audio/3gpp',
+            'video/3gpp' => 'audio/3gpp',
+        ];
+        $declared = $aliases[$declared] ?? $declared;
+        $detected = $aliases[$detected] ?? $detected;
 
-        return ($aliases[$declared] ?? $declared) === $detected;
+        // Expo often declares audio/m4a / audio/mp4 interchangeably with ftyp containers.
+        $mp4Family = ['audio/mp4', 'audio/3gpp'];
+        if (in_array($declared, $mp4Family, true) && in_array($detected, $mp4Family, true)) {
+            return true;
+        }
+
+        return $declared === $detected;
     }
 
     private function invalid(string $field, string $message): never

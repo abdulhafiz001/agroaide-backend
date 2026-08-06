@@ -55,6 +55,13 @@ php artisan test
 
 Focused suites: outbreak distance, auth API, scan history ownership.
 
+## AI providers (backend `.env` only)
+
+- **Crop scans:** Kindwise crop.health (`KINDWISE_API_KEY`, `KINDWISE_API_URL`) identifies crop/disease; Gemini rewrites the farmer-facing summary in the user’s language.
+- **Advisor / text AI:** Google AI Studio Gemini (`GEMINI_API_KEY`, `GEMINI_TEXT_MODEL`).
+- **Voice transcription:** Groq Whisper (`GROQ_API_KEY`) — still required for mic input.
+- Never put these keys in the Expo app or commit them to git. Set the same variables in Coolify for production.
+
 ## Security and privacy foundation
 
 - API tokens expire after 30 days and password changes revoke every token.

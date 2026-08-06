@@ -44,9 +44,18 @@ class ProcessCropScan implements ShouldQueue
             $mime = Storage::disk('local')->mimeType($scan->image_path) ?: 'image/jpeg';
             $result = $diagnosis->diagnose(
                 "data:{$mime};base64,".base64_encode($bytes),
-                array_filter(['crop' => $scan->farmField?->crop]),
+                array_filter([
+                    'crop' => $scan->farmField?->crop,
+                    'language' => $scan->user?->preferred_language ?? 'en',
+                    'latitude' => $scan->latitude ?? $scan->user?->farm_latitude,
+                    'longitude' => $scan->longitude ?? $scan->user?->farm_longitude,
+                ], static fn ($v) => $v !== null && $v !== ''),
             );
-            $state = $verification->initialState($result['confidence'], $result['canonical_valid']);
+            $state = $verification->initialState(
+                $result['confidence'],
+                $result['canonical_valid'],
+                (bool) ($result['research_backed'] ?? false),
+            );
             $condition = strtolower((string) ($result['parsed']['condition'] ?? 'unknown'));
             $diseaseName = data_get($result, 'parsed.disease.name');
             $eligible = in_array($state, ['auto_verified', 'expert_verified'], true)

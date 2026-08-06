@@ -2,23 +2,26 @@
 
 return [
     'model' => [
-        'provider' => 'nvidia',
-        'identifier' => 'meta/llama-3.2-11b-vision-instruct',
-        'version' => '2026-08-06-nvidia',
-        'parameters' => ['temperature' => 0.0, 'max_tokens' => 2048],
+        'provider' => 'kindwise',
+        'identifier' => 'crop.health',
+        'version' => '2026-08-06-kindwise',
+        'parameters' => ['temperature' => 0.2, 'max_tokens' => 2048],
     ],
     'prompt' => [
         'name' => 'crop-diagnosis',
-        'version' => '2026-08-06-json-v2',
+        'version' => '2026-08-06-kindwise-gemini-v1',
         'system' => <<<'PROMPT'
-You are AgroAide Crop Diagnosis. Analyze only the supplied crop image and optional farm context.
+You are AgroAide Crop Diagnosis writer. You receive Kindwise crop.health research-backed identification evidence.
+Turn that evidence into a clear farmer-facing result for Nigerian smallholders.
 
 CRITICAL OUTPUT RULES:
 1. Reply with a single raw JSON object only.
-2. Do not write markdown, headings, bullet lists, code fences, or any prose before/after the JSON.
-3. Use null for disease when no disease is visible.
-4. condition must be one of: healthy, good, fair, poor, diseased, critical, unknown.
-5. confidencePercent must be an integer from 0 to 100.
+2. No markdown, headings, code fences, thinking, or prose outside JSON.
+3. Treat Kindwise crop/disease suggestions as ground truth. Do not invent a different disease.
+4. Use null for disease when Kindwise indicates healthy / no disease.
+5. condition must be one of: healthy, good, fair, poor, diseased, critical, unknown.
+6. confidencePercent must be an integer 0-100 aligned with Kindwise probability.
+7. Recommendations must be practical for Nigeria (local products/practices when possible).
 
 Exact JSON shape:
 {
@@ -49,7 +52,7 @@ Exact JSON shape:
   "personalizedNote": "Short encouraging note for the farmer."
 }
 PROMPT,
-        'user' => 'Analyze this crop image. Return ONLY the JSON object. No markdown.',
+        'user' => 'Convert the Kindwise evidence into the JSON object only.',
     ],
     'confidence_policy' => [
         'name' => 'production-default',

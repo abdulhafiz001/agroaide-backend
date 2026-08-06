@@ -40,7 +40,21 @@ return [
         'endpoint' => 'https://my-api.plantnet.org/v2',
     ],
 
-    // Primary AI: NVIDIA NIM (build.nvidia.com). Key lives only in .env.
+    // Crop disease identification — Kindwise crop.health (backend only).
+    'kindwise' => [
+        'api_key' => env('KINDWISE_API_KEY'),
+        'base_url' => rtrim((string) env('KINDWISE_API_URL', 'https://crop.kindwise.com/api/v1'), '/'),
+    ],
+
+    // Primary AI — Google AI Studio / Gemini (backend only).
+    'gemini' => [
+        'api_key' => env('GEMINI_API_KEY'),
+        'base_url' => 'https://generativelanguage.googleapis.com/v1beta',
+        'text_model' => env('GEMINI_TEXT_MODEL', 'gemini-2.0-flash'),
+        'vision_model' => env('GEMINI_VISION_MODEL', 'gemini-2.0-flash'),
+    ],
+
+    // Optional legacy NVIDIA NIM fallback.
     'nvidia' => [
         'api_key' => env('NVIDIA_API_KEY'),
         'chat_endpoint' => 'https://integrate.api.nvidia.com/v1/chat/completions',
@@ -48,7 +62,7 @@ return [
         'vision_model' => env('NVIDIA_VISION_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
     ],
 
-    // Backup AI + Whisper transcription.
+    // Whisper transcription (+ optional chat fallback).
     'groq' => [
         'api_key' => env('GROQ_API_KEY'),
         'chat_endpoint' => 'https://api.groq.com/openai/v1/chat/completions',
