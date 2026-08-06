@@ -21,16 +21,28 @@ class AiAdvisorService
 
     /**
      * Chat with the AI advisor, passing full user context.
+     *
+     * @param  string|null  $languageOverride  Request language (takes priority over stale in-memory user).
      */
-    public function chat(User $user, string $message): string
+    public function chat(User $user, string $message, ?string $languageOverride = null): string
     {
+        $user->refresh();
+        if (is_string($languageOverride) && $languageOverride !== '') {
+            $lang = $languageOverride;
+            if (($user->preferred_language ?? 'en') !== $lang) {
+                $user->forceFill(['preferred_language' => $lang])->save();
+            }
+        } else {
+            $lang = $user->preferred_language ?? 'en';
+        }
+
         AdvisorConversation::create([
             'user_id' => $user->id,
             'role' => 'user',
             'message' => $message,
         ]);
 
-        $lang = $user->preferred_language ?? 'en';
+        $langName = TranslationService::languageName($lang);
         $systemPrompt = $this->buildSystemPrompt($user, $lang);
         // Includes the user message just saved — do not append it again.
         $conversationHistory = $this->getRecentConversation($user, 24);
@@ -45,6 +57,12 @@ class AiAdvisorService
                 'content' => $msg->message,
             ];
         }
+
+        // Hard override after history so older messages cannot keep the previous language.
+        $messages[] = [
+            'role' => 'user',
+            'content' => "SYSTEM REMINDER: Reply to my last farming question entirely in {$langName}. Do not use any other language. Do not show thinking.",
+        ];
 
         $reply = app(LlmResponseCleaner::class)->clean($this->askLlm($messages));
 
@@ -82,11 +100,22 @@ class AiAdvisorService
      */
     public function dailyInsight(User $user): array
     {
-        $cacheKey = "daily_insight_{$user->id}_".date('Y-m-d');
+        $user->refresh();
+        $lang = $user->preferred_language ?? 'en';
+        $cacheKey = "daily_insight_{$user->id}_{$lang}_".date('Y-m-d');
 
-        return Cache::remember($cacheKey, 86400, function () use ($user) {
-            return $this->generateDailyInsight($user);
+        return Cache::remember($cacheKey, 86400, function () use ($user, $lang) {
+            return $this->generateDailyInsight($user, $lang);
         });
+    }
+
+    public static function forgetDailyInsightCache(int $userId): void
+    {
+        foreach (['en', 'ha', 'yo', 'pcm'] as $lang) {
+            Cache::forget("daily_insight_{$userId}_{$lang}_".date('Y-m-d'));
+            // Legacy key from before language was part of the cache key.
+            Cache::forget("daily_insight_{$userId}_".date('Y-m-d'));
+        }
     }
 
     /**
@@ -112,13 +141,14 @@ class AiAdvisorService
         return array_slice($suggestions, 0, 4);
     }
 
-    private function generateDailyInsight(User $user): array
+    private function generateDailyInsight(User $user, string $lang = 'en'): array
     {
-        $systemPrompt = $this->buildSystemPrompt($user);
+        $systemPrompt = $this->buildSystemPrompt($user, $lang);
+        $langName = TranslationService::languageName($lang);
 
         $messages = [
             ['role' => 'system', 'content' => $systemPrompt],
-            ['role' => 'user', 'content' => 'Give me 2 short, actionable farming insights for today based on my farm conditions and current weather. Each insight should have a title (max 8 words) and a description (max 30 words). Return ONLY valid JSON array: [{"title": "...", "description": "..."}]'],
+            ['role' => 'user', 'content' => "Give me 2 short, actionable farming insights for today based on my farm conditions and current weather. Write title and description in {$langName}. Each insight should have a title (max 8 words) and a description (max 30 words). Return ONLY valid JSON array: [{\"title\": \"...\", \"description\": \"...\"}]"],
         ];
 
         $reply = $this->askLlm($messages, ['temperature' => 0.4, 'max_tokens' => 512]);
@@ -218,10 +248,8 @@ CRITICAL RULES:
 14. RISK STYLE ({$risk}): {$riskInstruction}
 PROMPT;
 
-        if ($lang !== 'en') {
-            $langName = TranslationService::languageName($lang);
-            $prompt .= "\n\nLANGUAGE: The farmer prefers {$langName}. They may write in {$langName} or English. ALWAYS respond entirely in {$langName}. Keep language natural, warm, and farmer-friendly. Do not mix in English except for product/scientific names when needed.";
-        }
+        $langName = TranslationService::languageName($lang);
+        $prompt .= "\n\nLANGUAGE (mandatory): Respond entirely in {$langName}. The farmer's current app language is {$lang}. Ignore the language of earlier chat history if it differs — always answer this turn in {$langName}. Keep language natural, warm, and farmer-friendly. Product/scientific names may stay in English when needed.";
 
         return $prompt;
     }

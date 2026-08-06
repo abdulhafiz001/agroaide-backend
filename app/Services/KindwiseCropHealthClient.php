@@ -18,7 +18,15 @@ class KindwiseCropHealthClient
      * Identify crop + disease/pest from a base64 image (with or without data-URL prefix).
      *
      * @param  array{latitude?:float,longitude?:float,language?:string}  $options
-     * @return array{access_token:?string,raw:array,crop:?array,disease:?array,is_healthy:bool,confidence:float}
+     * @return array{
+     *   access_token:?string,
+     *   raw:array,
+     *   crop:?array,
+     *   disease:?array,
+     *   is_healthy:bool,
+     *   is_crop:bool,
+     *   confidence:float
+     * }
      */
     public function identify(string $imageBase64OrDataUrl, array $options = []): array
     {
@@ -76,19 +84,20 @@ class KindwiseCropHealthClient
 
         $crop = $this->topSuggestion(data_get($raw, 'result.crop.suggestions'));
         $disease = $this->topSuggestion(data_get($raw, 'result.disease.suggestions'));
-        $isHealthy = $this->looksHealthy($disease);
-        $confidence = max(
-            (float) ($crop['probability'] ?? 0),
-            (float) ($disease['probability'] ?? 0),
-        );
+        $isCrop = $this->looksLikeCrop($raw, $crop, $disease);
+        $isHealthy = $isCrop && $this->looksHealthy($disease);
+        $confidence = $isCrop
+            ? max((float) ($crop['probability'] ?? 0), (float) ($disease['probability'] ?? 0))
+            : max(0.05, (float) ($crop['probability'] ?? 0));
 
         return [
             'access_token' => data_get($raw, 'access_token'),
             'raw' => $raw,
-            'crop' => $crop,
-            'disease' => $isHealthy ? null : $disease,
-            'is_healthy' => $isHealthy || $disease === null,
-            'confidence' => $confidence > 0 ? $confidence : 0.5,
+            'crop' => $isCrop ? $crop : null,
+            'disease' => ($isCrop && ! $isHealthy) ? $disease : null,
+            'is_healthy' => $isHealthy,
+            'is_crop' => $isCrop,
+            'confidence' => $confidence > 0 ? $confidence : 0.05,
         ];
     }
 
@@ -105,8 +114,6 @@ class KindwiseCropHealthClient
 
     private function mapLanguage(string $lang): string
     {
-        // Kindwise language coverage varies; Nigerian locales fall back to English details,
-        // then Gemini rewrites the farmer-facing copy in the preferred language.
         return match ($lang) {
             'ha', 'yo', 'pcm', 'en' => 'en',
             default => 'en',
@@ -126,6 +133,38 @@ class KindwiseCropHealthClient
         $top = $suggestions[0] ?? null;
 
         return is_array($top) ? $top : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  array<string, mixed>|null  $crop
+     * @param  array<string, mixed>|null  $disease
+     */
+    private function looksLikeCrop(array $raw, ?array $crop, ?array $disease): bool
+    {
+        // plant.id-style flag when present on crop.health responses
+        $isPlantBinary = data_get($raw, 'result.is_plant.binary');
+        if ($isPlantBinary === false || $isPlantBinary === 0 || $isPlantBinary === 'false') {
+            return false;
+        }
+        $isPlantProb = data_get($raw, 'result.is_plant.probability');
+        if (is_numeric($isPlantProb) && (float) $isPlantProb < 0.35) {
+            return false;
+        }
+
+        $cropProb = (float) ($crop['probability'] ?? 0);
+        $diseaseProb = (float) ($disease['probability'] ?? 0);
+
+        if ($crop === null && $disease === null) {
+            return false;
+        }
+
+        // Random photos often still get a weak top suggestion — require a real signal.
+        if ($cropProb < 0.28 && $diseaseProb < 0.35) {
+            return false;
+        }
+
+        return true;
     }
 
     private function looksHealthy(?array $disease): bool

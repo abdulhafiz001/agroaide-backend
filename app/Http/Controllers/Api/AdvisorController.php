@@ -22,11 +22,14 @@ class AdvisorController extends Controller
     {
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
+            'language' => ['nullable', 'string', 'in:en,ha,yo,pcm'],
+            'preferredLanguage' => ['nullable', 'string', 'in:en,ha,yo,pcm'],
         ]);
 
         /** @var User $user */
         $user = $request->user();
-        $reply = $this->advisorService->chat($user, trim($validated['message']));
+        $language = $validated['language'] ?? $validated['preferredLanguage'] ?? null;
+        $reply = $this->advisorService->chat($user, trim($validated['message']), $language);
 
         return response()->json(['reply' => $reply]);
     }

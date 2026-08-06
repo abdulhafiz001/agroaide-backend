@@ -3,12 +3,16 @@
 namespace App\Services;
 
 use App\Models\FarmField;
+use App\Models\InputEstimateHistory;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
 class InputEstimateService
 {
-    public function __construct(private LlmChatClient $llm) {}
+    public function __construct(
+        private LlmChatClient $llm,
+        private LlmResponseCleaner $cleaner,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -73,7 +77,6 @@ class InputEstimateService
             'disclaimer' => 'Guide only — may not be 100% correct for your soil and variety.',
         ];
 
-        // Numbers always return immediately. AI rewrite is optional and must not block Calculate.
         $numbers['aiSummary'] = $this->buildFallbackSummary($user, $numbers);
         try {
             $ai = $this->summarizeWithAi($user, $numbers);
@@ -84,7 +87,73 @@ class InputEstimateService
             Log::warning('InputEstimate AI skipped', ['message' => $e->getMessage()]);
         }
 
+        $history = InputEstimateHistory::create([
+            'user_id' => $user->id,
+            'farm_field_id' => $field->id,
+            'crop' => $cropKey,
+            'area_m2' => $numbers['areaM2'],
+            'row_cm' => $row,
+            'intra_cm' => $intra,
+            'population' => $population,
+            'result_json' => $numbers,
+            'ai_summary' => $numbers['aiSummary'],
+        ]);
+        $numbers['historyId'] = (string) $history->id;
+        $numbers['savedAt'] = optional($history->created_at)?->toIso8601String();
+
         return $numbers;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function historyForField(User $user, FarmField $field, int $limit = 30): array
+    {
+        return InputEstimateHistory::query()
+            ->where('user_id', $user->id)
+            ->where('farm_field_id', $field->id)
+            ->latest('id')
+            ->limit($limit)
+            ->get()
+            ->map(fn (InputEstimateHistory $row) => $this->transformHistory($row))
+            ->all();
+    }
+
+    public function deleteHistory(User $user, int $historyId): bool
+    {
+        $row = InputEstimateHistory::query()
+            ->where('user_id', $user->id)
+            ->where('id', $historyId)
+            ->first();
+
+        if (! $row) {
+            return false;
+        }
+
+        $row->delete();
+
+        return true;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function transformHistory(InputEstimateHistory $row): array
+    {
+        $result = is_array($row->result_json) ? $row->result_json : [];
+
+        return [
+            'id' => (string) $row->id,
+            'fieldId' => (string) $row->farm_field_id,
+            'crop' => $row->crop,
+            'areaM2' => $row->area_m2,
+            'rowCm' => $row->row_cm,
+            'intraCm' => $row->intra_cm,
+            'population' => $row->population,
+            'aiSummary' => $row->ai_summary ?: ($result['aiSummary'] ?? null),
+            'estimate' => $result,
+            'date' => optional($row->created_at)?->toIso8601String(),
+        ];
     }
 
     /**
@@ -108,26 +177,35 @@ class InputEstimateService
      */
     private function summarizeWithAi(User $user, array $numbers): string
     {
+        $user->refresh();
         $lang = $user->preferred_language ?? 'en';
         $langName = TranslationService::languageName($lang);
         $fallback = $this->buildFallbackSummary($user, $numbers);
 
-        $prompt = 'Rewrite these farm input numbers into 3-5 short friendly sentences for a Nigerian farmer. '
-            ."Use ONLY these numbers — do not invent different amounts. Language: {$langName}. "
-            ."Include the disclaimer that it is a guide and may not be 100% correct.\n\n"
+        $prompt = "Write 3-5 short friendly sentences in {$langName} for a Nigerian farmer. "
+            .'Use ONLY these numbers — never invent different amounts. '
+            .'Do NOT include thinking, analysis, checklists, or phrases like "thinking process". '
+            .'Output the farmer sentences only.'."\n\n"
             .json_encode($numbers, JSON_PRETTY_PRINT);
 
         try {
-            $content = $this->llm->chat([
-                ['role' => 'system', 'content' => 'You write short agronomy summaries. Never change numeric quantities.'],
+            $content = $this->cleaner->clean($this->llm->chat([
+                [
+                    'role' => 'system',
+                    'content' => 'You write short agronomy summaries for farmers. Never change numeric quantities. Never show thinking. Reply with the final farmer-facing sentences only.',
+                ],
                 ['role' => 'user', 'content' => $prompt],
             ], [
-                'timeout' => 8,
-                'max_tokens' => 280,
-                'temperature' => 0.3,
-            ]);
+                'timeout' => 12,
+                'max_tokens' => 320,
+                'temperature' => 0.2,
+            ]));
 
-            return $content !== '' ? $content : $fallback;
+            if ($content === '' || preg_match('/thinking process|analyze user input/i', $content)) {
+                return $fallback;
+            }
+
+            return $content;
         } catch (\Throwable $e) {
             Log::debug('Input estimate AI summary skipped', ['error' => $e->getMessage()]);
 

@@ -51,6 +51,28 @@ class CropDiagnosisService
         }
 
         $rawKindwise = json_encode($kindwise['raw'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+
+        if (! ($kindwise['is_crop'] ?? false)) {
+            $parsed = $this->nonCropResult($language);
+            $latency = (int) round((hrtime(true) - $started) / 1_000_000);
+
+            return [
+                'parsed' => $parsed,
+                'raw' => $rawKindwise."\n---\n".json_encode($parsed),
+                'raw_checksum' => hash('sha256', $rawKindwise),
+                'model_version_id' => $model->id,
+                'prompt_version_id' => $prompt->id,
+                'confidence_policy_id' => $policy->id,
+                'crop_label_id' => null,
+                'disease_label_id' => null,
+                'canonical_valid' => false,
+                // High enough to complete (not "failed"), while UI shows unknown / not-a-crop.
+                'confidence' => 0.55,
+                'latency_ms' => $latency,
+                'research_backed' => true,
+            ];
+        }
+
         $farmerJson = $this->explainWithGemini($kindwise, $context, $language, $prompt);
         $latency = (int) round((hrtime(true) - $started) / 1_000_000);
 
@@ -77,6 +99,11 @@ class CropDiagnosisService
                 $parsed['condition'] = 'healthy';
                 $parsed['conditionLabel'] = 'Healthy';
             }
+        }
+
+        // Never show a disease card when condition is unknown / not a crop.
+        if (($parsed['condition'] ?? '') === 'unknown') {
+            $parsed['disease'] = null;
         }
 
         $confidencePercent = (int) round(max(0, min(1, (float) $kindwise['confidence'])) * 100);
@@ -108,6 +135,55 @@ class CropDiagnosisService
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function nonCropResult(string $language): array
+    {
+        $copy = match ($language) {
+            'ha' => [
+                'summary' => 'Wannan hoton ba na amfanin gona ba ne. Da fatan za a ɗauki kusa da ganye ko shuka.',
+                'note' => 'Don ganewa mai kyau, ɗauki hoton shuka a haske mai kyau.',
+                'immediate' => ['Ƙara ɗaukar hoton ganye ko shuka', 'Tabbatar da haske yayi kyau'],
+            ],
+            'yo' => [
+                'summary' => 'Aworan yii kii se ohun ogbin. Jowo ya aworan ewe tabi irugbin.',
+                'note' => 'Fun abajade to dara, ya aworan ogbin ni ina to dara.',
+                'immediate' => ['Ya aworan ewe tabi ogbin', 'Rii daju pe ina to dara'],
+            ],
+            'pcm' => [
+                'summary' => 'This photo no be crop/plant. Abeg snap leaf or crop wey clear.',
+                'note' => 'For better result, take clear photo of your crop for good light.',
+                'immediate' => ['Snap clear crop or leaf photo', 'Make sure light dey okay'],
+            ],
+            default => [
+                'summary' => 'This does not look like a crop or plant photo. Please take a clear picture of leaves or crops in the field.',
+                'note' => 'For a useful diagnosis, photograph the plant (close-up of leaves) in good light.',
+                'immediate' => ['Take a clear photo of the crop or leaves', 'Use good lighting and avoid blur'],
+            ],
+        };
+
+        return [
+            'crop' => null,
+            'condition' => 'unknown',
+            'conditionLabel' => 'Not a crop photo',
+            'confidencePercent' => 10,
+            'summary' => $copy['summary'],
+            'details' => null,
+            'disease' => null,
+            'recommendations' => [
+                'immediate' => $copy['immediate'],
+                'products' => [],
+                'prevention' => [],
+                'longTerm' => [],
+            ],
+            'personalizedNote' => $copy['note'],
+            'source' => 'kindwise',
+            'researchBacked' => true,
+            'isCrop' => false,
+        ];
+    }
+
+    /**
      * @param  array{crop:?array,disease:?array,is_healthy:bool,confidence:float,raw:array}  $kindwise
      * @param  array{crop?:string}  $context
      */
@@ -125,6 +201,7 @@ class CropDiagnosisService
             'kindwiseCrop' => $kindwise['crop'],
             'kindwiseDisease' => $kindwise['disease'],
             'isHealthy' => $kindwise['is_healthy'],
+            'isCrop' => $kindwise['is_crop'] ?? true,
             'confidence' => $kindwise['confidence'],
             'cropSuggestions' => array_slice(data_get($kindwise, 'raw.result.crop.suggestions', []) ?: [], 0, 3),
             'diseaseSuggestions' => array_slice(data_get($kindwise, 'raw.result.disease.suggestions', []) ?: [], 0, 3),
@@ -133,7 +210,7 @@ class CropDiagnosisService
         $messages = [
             [
                 'role' => 'system',
-                'content' => $prompt->system_prompt."\n\nWrite every farmer-facing string in {$langName}. Never include thinking, analysis, or chain-of-thought — JSON only.",
+                'content' => $prompt->system_prompt."\n\nWrite every farmer-facing string in {$langName}. Never include thinking, analysis, or chain-of-thought — JSON only. If isCrop is false, set condition to unknown, disease to null, and explain that the photo is not a crop.",
             ],
             [
                 'role' => 'user',

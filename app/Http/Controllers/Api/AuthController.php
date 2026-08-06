@@ -216,6 +216,7 @@ class AuthController extends Controller
         }
         if (isset($validated['preferredLanguage'])) {
             $updateData['preferred_language'] = $validated['preferredLanguage'];
+            \App\Services\AiAdvisorService::forgetDailyInsightCache((int) $user->id);
         }
         if (isset($validated['aiResponseDepth'])) {
             $updateData['ai_response_depth'] = $validated['aiResponseDepth'];

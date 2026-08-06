@@ -63,7 +63,7 @@ class FarmImageAnalysisService
     public function getHistory(User $user, int $limit = 20): array
     {
         return FarmImageAnalysis::where('user_id', $user->id)
-            ->with('farmField:id,name,crop')
+            ->with(['farmField:id,name,crop', 'feedback'])
             ->orderBy('created_at', 'desc')
             ->limit($limit)
             ->get()
@@ -75,7 +75,7 @@ class FarmImageAnalysisService
     {
         $scan = FarmImageAnalysis::where('user_id', $user->id)
             ->where('id', $scanId)
-            ->with('farmField:id,name,crop')
+            ->with(['farmField:id,name,crop', 'feedback'])
             ->first();
 
         if (! $scan) {
@@ -127,11 +127,32 @@ class FarmImageAnalysisService
             'provisional' => in_array($a->verification_state, ['needs_retake', 'disputed'], true),
             'outbreakEligible' => (bool) $a->outbreak_eligible,
             'safeErrorCode' => $a->safe_error_code,
+            'feedback' => $this->transformFeedback($a),
             // Served via authenticated API so private-disk images work on devices
             // (APP_URL/localhost public URLs break on real phones).
             'imagePath' => $a->image_path
                 ? "/farm/scan-history/{$a->id}/image"
                 : null,
+        ];
+    }
+
+    /**
+     * @return array{accurate:bool,verdict:string,reason:?string}|null
+     */
+    private function transformFeedback(FarmImageAnalysis $scan): ?array
+    {
+        $feedback = $scan->relationLoaded('feedback')
+            ? $scan->feedback->first()
+            : $scan->feedback()->latest('id')->first();
+
+        if (! $feedback) {
+            return null;
+        }
+
+        return [
+            'accurate' => $feedback->verdict === 'correct',
+            'verdict' => (string) $feedback->verdict,
+            'reason' => $feedback->comment,
         ];
     }
 

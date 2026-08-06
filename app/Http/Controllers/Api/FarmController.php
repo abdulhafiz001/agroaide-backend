@@ -380,6 +380,27 @@ class FarmController extends Controller
         }
     }
 
+    public function inputEstimateHistory(Request $request, int $fieldId): JsonResponse
+    {
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        return response()->json([
+            'history' => $this->inputEstimateService->historyForField($request->user(), $field),
+        ]);
+    }
+
+    public function deleteInputEstimate(Request $request, int $historyId): JsonResponse
+    {
+        $deleted = $this->inputEstimateService->deleteHistory($request->user(), $historyId);
+        if (! $deleted) {
+            return response()->json(['message' => 'Estimate history not found.'], 404);
+        }
+
+        return response()->json(['message' => 'Estimate deleted.']);
+    }
+
     public function updateBoundary(Request $request, int $fieldId): JsonResponse
     {
         $field = FarmField::where('user_id', $request->user()->id)
@@ -618,6 +639,11 @@ class FarmController extends Controller
 
         return response()->json([
             'feedbackId' => (string) $feedback->id,
+            'feedback' => [
+                'accurate' => $feedback->verdict === 'correct',
+                'verdict' => $feedback->verdict,
+                'reason' => $feedback->comment,
+            ],
             'scan' => [
                 'id' => (string) $scan->id,
                 'verificationState' => $scan->verification_state,

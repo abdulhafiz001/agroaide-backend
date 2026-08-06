@@ -49,6 +49,8 @@ Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void 
     Route::delete('/farm/fields/{fieldId}', [FarmController::class, 'deleteField']);
     Route::delete('/farm/fields/{fieldId}/boundary', [FarmController::class, 'clearBoundary']);
     Route::post('/farm/fields/{fieldId}/input-estimate', [FarmController::class, 'inputEstimate']);
+    Route::get('/farm/fields/{fieldId}/input-estimates', [FarmController::class, 'inputEstimateHistory']);
+    Route::delete('/farm/input-estimates/{historyId}', [FarmController::class, 'deleteInputEstimate']);
     Route::put('/farm/fields/{fieldId}/boundary', [FarmController::class, 'updateBoundary']);
     Route::post('/farm/journal', [FarmController::class, 'addJournalEntry']);
     Route::put('/farm/journal/{entryId}', [FarmController::class, 'updateJournalEntry']);
