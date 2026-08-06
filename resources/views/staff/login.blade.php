@@ -21,7 +21,14 @@
         @error('email')<p class="mt-3 text-sm text-red-700">{{ $message }}</p>@enderror
         <label class="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" name="remember" value="1"> Remember me</label>
         <button class="mt-6 w-full rounded-lg bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-800">Sign in</button>
+        @if ($needsSetup ?? false)
+            <p class="mt-4 text-center text-sm text-stone-600">
+                No staff yet —
+                <a href="{{ route('staff.setup') }}" class="font-medium text-emerald-700 hover:underline">create the first admin</a>
+            </p>
+        @endif
     </form>
 </main>
 </body>
 </html>
+

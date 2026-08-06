@@ -55,7 +55,8 @@ class DiagnosisDomainSeeder extends Seeder
             ['parameters' => $model['parameters'], 'checksum' => hash('sha256', json_encode($model)), 'active' => true],
         );
         $prompt = config('diagnosis.prompt');
-        PromptVersion::firstOrCreate(
+        PromptVersion::query()->update(['active' => false]);
+        PromptVersion::updateOrCreate(
             ['name' => $prompt['name'], 'version' => $prompt['version']],
             [
                 'system_prompt' => $prompt['system'], 'user_prompt' => $prompt['user'],
@@ -63,7 +64,8 @@ class DiagnosisDomainSeeder extends Seeder
             ],
         );
         $policy = config('diagnosis.confidence_policy');
-        ConfidencePolicy::firstOrCreate(
+        ConfidencePolicy::query()->update(['active' => false]);
+        ConfidencePolicy::updateOrCreate(
             ['name' => $policy['name'], 'version' => $policy['version']],
             [
                 'retake_below' => $policy['retake_below'], 'review_below' => $policy['review_below'],

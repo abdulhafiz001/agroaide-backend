@@ -15,6 +15,10 @@ Route::middleware('guest')->group(function (): void {
     Route::post('/staff/login', [StaffController::class, 'authenticate'])
         ->middleware('throttle:staff-login')
         ->name('staff.authenticate');
+    Route::get('/staff/setup', [StaffController::class, 'setup'])->name('staff.setup');
+    Route::post('/staff/setup', [StaffController::class, 'storeSetup'])
+        ->middleware('throttle:staff-login')
+        ->name('staff.setup.store');
 });
 Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
     Route::get('/', [StaffController::class, 'dashboard'])->name('staff.dashboard');

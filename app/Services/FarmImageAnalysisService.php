@@ -84,9 +84,27 @@ class FarmImageAnalysisService
 
         return [
             ...$this->transformScanSummary($scan),
-            'analysis' => is_array($scan->result_json) ? $scan->result_json : [],
+            'analysis' => $this->transformAnalysisPayload($scan),
             'farmFieldId' => $scan->farm_field_id ? (string) $scan->farm_field_id : null,
         ];
+    }
+
+    /**
+     * Only return a real analysis payload after a successful completed run.
+     * Empty result_json ([]) must not look like a successful scan to clients.
+     */
+    private function transformAnalysisPayload(FarmImageAnalysis $scan): ?array
+    {
+        if ($scan->processing_state !== 'completed') {
+            return null;
+        }
+
+        $analysis = is_array($scan->result_json) ? $scan->result_json : [];
+        if ($analysis === [] || ! isset($analysis['condition'], $analysis['summary'])) {
+            return null;
+        }
+
+        return $analysis;
     }
 
     private function transformScanSummary(FarmImageAnalysis $a): array

@@ -17,6 +17,8 @@ class CropDiagnosisService
 
     public function diagnose(string $imageDataUrl, array $context = [], array $versions = []): array
     {
+        $this->ensureDomainReady();
+
         $model = isset($versions['model_version_id'])
             ? ModelVersion::findOrFail($versions['model_version_id'])
             : ModelVersion::where('active', true)->latest('id')->firstOrFail();
@@ -73,5 +75,22 @@ class CropDiagnosisService
             'confidence' => $confidence,
             'latency_ms' => $latency,
         ];
+    }
+
+    /**
+     * Production deploys may skip DatabaseSeeder; still need model/prompt/policy rows.
+     */
+    private function ensureDomainReady(): void
+    {
+        $ready = ModelVersion::where('active', true)->exists()
+            && PromptVersion::where('active', true)->exists()
+            && ConfidencePolicy::where('active', true)->exists();
+
+        if ($ready) {
+            return;
+        }
+
+        Log::warning('Diagnosis domain incomplete — running DiagnosisDomainSeeder');
+        (new \Database\Seeders\DiagnosisDomainSeeder)->run();
     }
 }

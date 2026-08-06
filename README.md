@@ -85,14 +85,16 @@ php artisan agroaide:health-snapshot
 
 The staff dashboard is served same-origin at `/staff/login` using the local Vite/Tailwind build. Agronomists review scans and read aggregate evaluation metrics; administrator-only pages manage run queueing, confidence-policy activation, staff roles, and audit details. Staff credentials are created interactively; no credentials are seeded or sourced from environment variables. In production, Supervisor runs the database-backed diagnosis/evaluation worker and Laravel scheduler.
 
-Create the first administrator interactively:
+**First admin (production):** open `/staff/setup` while no staff accounts exist (for this project: `https://agroaide.ahzcode.sbs/staff/setup`). After that, sign in at `/staff/login` (`https://agroaide.ahzcode.sbs/staff/login`). The setup page disables itself once any admin/agronomist exists.
+
+Alternatively, create an administrator from the container shell:
 
 ```bash
 php artisan migrate
 php artisan agroaide:staff-account your-email@example.com --role=admin
 ```
 
-The command securely asks for the administrator's name and hidden password. Then sign in at `http://127.0.0.1:8000/staff/login`, or replace `127.0.0.1` with the backend server/LAN address.
+Locally: `http://127.0.0.1:8000/staff/setup` then `/staff/login`.
 
 `POST /api/farm/scans/{scan}/feedback` is throttled and idempotent per farmer/scan: repeated taps update the current feedback record instead of creating duplicate metric events.
 

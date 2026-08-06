@@ -92,13 +92,11 @@ php artisan route:cache
 php artisan view:cache
 
 # ---------------------------------------------------------------------------
-# 5. Seeders — SKIPPED
-# DatabaseSeeder creates a fixed Test User (test@example.com) and is NOT
-# idempotent (second run fails on unique email). Do not auto-seed in prod.
-# Run manually only if you intentionally want that demo user:
-#   php artisan db:seed --force
+# 5. Seed diagnosis domain (idempotent) — required for crop scans
+# DatabaseSeeder (demo user) is NOT run here — it is not idempotent.
 # ---------------------------------------------------------------------------
-echo "[entrypoint] Skipping db:seed (DatabaseSeeder is not idempotent)."
+echo "[entrypoint] Seeding diagnosis domain (labels, model/prompt/policy)…"
+php artisan db:seed --class=DiagnosisDomainSeeder --force
 
 # ---------------------------------------------------------------------------
 # 6. Hand off to supervisord (nginx + php-fpm + schedule:work)
