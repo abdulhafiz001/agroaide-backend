@@ -9,6 +9,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! Schema::hasTable('scan_feedback')) {
+            return;
+        }
+
         DB::table('scan_feedback')
             ->orderByDesc('id')
             ->get()
@@ -17,15 +21,29 @@ return new class extends Migration
                 DB::table('scan_feedback')->whereIn('id', $rows->skip(1)->pluck('id'))->delete();
             });
 
-        Schema::table('scan_feedback', function (Blueprint $table): void {
-            $table->unique(['farm_image_analysis_id', 'user_id'], 'scan_feedback_scan_user_unique');
-        });
+        if (! $this->hasIndex('scan_feedback', 'scan_feedback_scan_user_unique')) {
+            Schema::table('scan_feedback', function (Blueprint $table): void {
+                $table->unique(['farm_image_analysis_id', 'user_id'], 'scan_feedback_scan_user_unique');
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('scan_feedback', function (Blueprint $table): void {
-            $table->dropUnique('scan_feedback_scan_user_unique');
-        });
+        if (! Schema::hasTable('scan_feedback')) {
+            return;
+        }
+
+        if ($this->hasIndex('scan_feedback', 'scan_feedback_scan_user_unique')) {
+            Schema::table('scan_feedback', function (Blueprint $table): void {
+                $table->dropUnique('scan_feedback_scan_user_unique');
+            });
+        }
+    }
+
+    private function hasIndex(string $table, string $indexName): bool
+    {
+        return collect(Schema::getIndexes($table))
+            ->contains(fn (array $index): bool => ($index['name'] ?? null) === $indexName);
     }
 };
