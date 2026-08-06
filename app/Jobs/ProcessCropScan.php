@@ -88,16 +88,29 @@ class ProcessCropScan implements ShouldQueue
                 'status' => 'completed', 'heartbeat_at' => now(), 'finished_at' => now(), 'updated_at' => now(),
             ]);
         } catch (Throwable $e) {
+            $safeCode = match (true) {
+                str_contains($e->getMessage(), 'provider') => 'provider_unavailable',
+                str_contains($e->getMessage(), 'parse') => 'analysis_parse_failed',
+                default => 'processing_failed',
+            };
             $scan->update([
                 'processing_state' => 'failed',
                 'verification_state' => 'needs_retake',
                 'outbreak_eligible' => false,
-                'safe_error_code' => str_contains($e->getMessage(), 'provider') ? 'provider_unavailable' : 'processing_failed',
+                'safe_error_code' => $safeCode,
                 'processing_completed_at' => now(),
             ]);
             DB::table('system_job_runs')->where('id', $jobRunId)->update([
-                'status' => 'failed', 'heartbeat_at' => now(), 'finished_at' => now(),
-                'safe_error_code' => $scan->safe_error_code, 'updated_at' => now(),
+                'status' => 'failed',
+                'heartbeat_at' => now(),
+                'finished_at' => now(),
+                'safe_error_code' => $safeCode,
+                'safe_metadata' => json_encode([
+                    'exception' => class_basename($e),
+                    'message' => substr($e->getMessage(), 0, 180),
+                    'previous' => $e->getPrevious() ? substr($e->getPrevious()->getMessage(), 0, 180) : null,
+                ]),
+                'updated_at' => now(),
             ]);
             throw $e;
         }

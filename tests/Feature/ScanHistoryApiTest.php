@@ -59,6 +59,7 @@ class ScanHistoryApiTest extends TestCase
             'user_id' => $user->id,
             'condition' => 'fair',
             'disease_name' => null,
+            'processing_state' => 'completed',
             'result_json' => [
                 'condition' => 'fair',
                 'conditionLabel' => 'Fair',

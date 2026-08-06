@@ -13,6 +13,7 @@ class CropDiagnosisService
     public function __construct(
         private CanonicalLabelResolver $labels,
         private LlmChatClient $llm,
+        private DiagnosisResponseParser $parser,
     ) {}
 
     public function diagnose(string $imageDataUrl, array $context = [], array $versions = []): array
@@ -43,7 +44,6 @@ class CropDiagnosisService
                 'timeout' => 90,
                 'temperature' => 0.0,
                 'max_tokens' => 2048,
-                // Some NVIDIA models reject response_format; client still gets JSON via prompt.
             ], is_array($model->parameters) ? $model->parameters : []));
         } catch (\Throwable $e) {
             Log::error('Crop diagnosis provider failed', ['error' => $e->getMessage()]);
@@ -51,11 +51,18 @@ class CropDiagnosisService
         }
 
         $latency = (int) round((hrtime(true) - $started) / 1_000_000);
-        $clean = trim(preg_replace('/^```(?:json)?|```$/m', '', $raw) ?? $raw);
-        $parsed = json_decode($clean, true);
-        if (! is_array($parsed)) {
-            throw new RuntimeException('diagnosis_parse_error');
+
+        try {
+            $parsed = $this->parser->parse($raw);
+        } catch (\Throwable $e) {
+            Log::error('Crop diagnosis parse failed', [
+                'error' => $e->getMessage(),
+                'raw_prefix' => substr($raw, 0, 280),
+            ]);
+            throw new RuntimeException('diagnosis_parse_error', 0, $e);
         }
+
+        unset($parsed['_raw_fallback']);
 
         $crop = $this->labels->resolve($parsed['crop'] ?? null, 'crop');
         $diseaseName = data_get($parsed, 'disease.name');
@@ -82,15 +89,25 @@ class CropDiagnosisService
      */
     private function ensureDomainReady(): void
     {
+        $promptCfg = config('diagnosis.prompt');
         $ready = ModelVersion::where('active', true)->exists()
-            && PromptVersion::where('active', true)->exists()
-            && ConfidencePolicy::where('active', true)->exists();
+            && ConfidencePolicy::where('active', true)->exists()
+            && PromptVersion::query()
+                ->where('name', $promptCfg['name'])
+                ->where('version', $promptCfg['version'])
+                ->where('active', true)
+                ->exists();
 
         if ($ready) {
             return;
         }
 
-        Log::warning('Diagnosis domain incomplete — running DiagnosisDomainSeeder');
-        (new \Database\Seeders\DiagnosisDomainSeeder)->run();
+        Log::warning('Diagnosis domain incomplete or outdated — running DiagnosisDomainSeeder');
+        try {
+            (new \Database\Seeders\DiagnosisDomainSeeder)->run();
+        } catch (\Throwable $e) {
+            Log::error('DiagnosisDomainSeeder failed', ['error' => $e->getMessage()]);
+            // Continue if an older active set already exists; otherwise diagnose() will fail clearly.
+        }
     }
 }

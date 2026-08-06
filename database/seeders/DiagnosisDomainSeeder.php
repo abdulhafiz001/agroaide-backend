@@ -7,6 +7,7 @@ use App\Models\ConfidencePolicy;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 class DiagnosisDomainSeeder extends Seeder
 {
@@ -48,31 +49,50 @@ class DiagnosisDomainSeeder extends Seeder
             }
         }
 
+        // Model/prompt/policy rows are immutable after creation — never Eloquent-update them.
+        // Create missing versions, then flip `active` via query builder.
         $model = config('diagnosis.model');
-        ModelVersion::query()->update(['active' => false]);
-        ModelVersion::updateOrCreate(
-            ['provider' => $model['provider'], 'model_identifier' => $model['identifier'], 'version' => $model['version']],
-            ['parameters' => $model['parameters'], 'checksum' => hash('sha256', json_encode($model)), 'active' => true],
+        $modelVersion = ModelVersion::query()->firstOrCreate(
+            [
+                'provider' => $model['provider'],
+                'model_identifier' => $model['identifier'],
+                'version' => $model['version'],
+            ],
+            [
+                'parameters' => $model['parameters'],
+                'checksum' => hash('sha256', json_encode($model)),
+                'active' => false,
+            ],
         );
+        DB::table('model_versions')->update(['active' => false, 'updated_at' => now()]);
+        DB::table('model_versions')->where('id', $modelVersion->id)->update(['active' => true, 'updated_at' => now()]);
+
         $prompt = config('diagnosis.prompt');
-        PromptVersion::query()->update(['active' => false]);
-        PromptVersion::updateOrCreate(
+        $promptVersion = PromptVersion::query()->firstOrCreate(
             ['name' => $prompt['name'], 'version' => $prompt['version']],
             [
-                'system_prompt' => $prompt['system'], 'user_prompt' => $prompt['user'],
-                'checksum' => hash('sha256', $prompt['system']."\n".$prompt['user']), 'active' => true,
+                'system_prompt' => $prompt['system'],
+                'user_prompt' => $prompt['user'],
+                'checksum' => hash('sha256', $prompt['system']."\n".$prompt['user']),
+                'active' => false,
             ],
         );
+        DB::table('prompt_versions')->update(['active' => false, 'updated_at' => now()]);
+        DB::table('prompt_versions')->where('id', $promptVersion->id)->update(['active' => true, 'updated_at' => now()]);
+
         $policy = config('diagnosis.confidence_policy');
-        ConfidencePolicy::query()->update(['active' => false]);
-        ConfidencePolicy::updateOrCreate(
+        $policyVersion = ConfidencePolicy::query()->firstOrCreate(
             ['name' => $policy['name'], 'version' => $policy['version']],
             [
-                'retake_below' => $policy['retake_below'], 'review_below' => $policy['review_below'],
+                'retake_below' => $policy['retake_below'],
+                'review_below' => $policy['review_below'],
                 'require_canonical' => $policy['require_canonical'],
-                'checksum' => hash('sha256', json_encode($policy)), 'active' => true,
+                'checksum' => hash('sha256', json_encode($policy)),
+                'active' => false,
             ],
         );
+        DB::table('confidence_policies')->update(['active' => false, 'updated_at' => now()]);
+        DB::table('confidence_policies')->where('id', $policyVersion->id)->update(['active' => true, 'updated_at' => now()]);
     }
 
     private function normalize(string $value): string
