@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Services\AiAdvisorService;
 use App\Services\VoiceTranscriptionService;
+use App\Support\MediaPayloadValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -13,6 +15,7 @@ class AdvisorController extends Controller
     public function __construct(
         private AiAdvisorService $advisorService,
         private VoiceTranscriptionService $voiceService,
+        private MediaPayloadValidator $mediaValidator,
     ) {}
 
     public function chat(Request $request): JsonResponse
@@ -21,7 +24,7 @@ class AdvisorController extends Controller
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $reply = $this->advisorService->chat($user, trim($validated['message']));
 
@@ -30,7 +33,7 @@ class AdvisorController extends Controller
 
     public function suggestions(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         return response()->json([
@@ -40,7 +43,7 @@ class AdvisorController extends Controller
 
     public function history(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         return response()->json([
@@ -50,7 +53,7 @@ class AdvisorController extends Controller
 
     public function dailyInsight(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         return response()->json([
@@ -65,11 +68,12 @@ class AdvisorController extends Controller
             'languageHint' => ['nullable', 'string', 'max:5'],
         ]);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $lang = $validated['languageHint'] ?? $user->preferred_language ?? 'en';
 
-        $result = $this->voiceService->transcribe($validated['audioBase64'], $lang);
+        $media = $this->mediaValidator->audio($validated['audioBase64']);
+        $result = $this->voiceService->transcribe($media, $lang);
 
         return response()->json($result);
     }

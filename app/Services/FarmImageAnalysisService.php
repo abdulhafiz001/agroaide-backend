@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\ProcessCropScan;
 use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\User;
@@ -12,10 +13,15 @@ use Illuminate\Support\Facades\Storage;
 class FarmImageAnalysisService
 {
     private string $githubModelsKey;
+
     private string $visionModel;
+
     private string $githubModelsEndpoint;
+
     private string $githubModelsApiVersion;
+
     private string $plantNetKey;
+
     private string $plantNetEndpoint;
 
     public function __construct(
@@ -32,25 +38,13 @@ class FarmImageAnalysisService
     }
 
     /**
-     * Run full analysis pipeline: PlantNet disease check → GitHub Models vision analysis.
+     * Validate/store happens in the request; inference runs on the database queue.
      */
     public function analyze(User $user, string $base64Image, ?int $farmFieldId = null): array
     {
-        $field = null;
-        if ($farmFieldId) {
-            $field = FarmField::where('user_id', $user->id)->where('id', $farmFieldId)->first();
-        }
-
-        $plantNetResult = $this->callPlantNet($base64Image);
-
-        $lang = $user->preferred_language ?? 'en';
-        $visionResult = $this->callVisionModel($user, $field, $base64Image, $plantNetResult, $lang);
-
         $storedPath = $this->storeImage($user, $base64Image);
-
-        $diseaseName = null;
-        if (isset($visionResult['disease']['name'])) {
-            $diseaseName = $visionResult['disease']['name'];
+        if ($storedPath === null) {
+            throw new \RuntimeException('Validated scan image could not be stored.');
         }
 
         $scan = FarmImageAnalysis::create([
@@ -59,40 +53,18 @@ class FarmImageAnalysisService
             'latitude' => $user->farm_latitude,
             'longitude' => $user->farm_longitude,
             'image_path' => $storedPath,
-            'condition' => $visionResult['condition'] ?? 'unknown',
-            'disease_name' => $diseaseName,
-            'result_json' => $visionResult,
+            'condition' => 'unknown',
+            'disease_name' => null,
+            'result_json' => [],
+            'processing_state' => 'queued',
+            'verification_state' => 'pending_review',
+            'outbreak_eligible' => false,
         ]);
-
-        if ($field && isset($visionResult['condition'])) {
-            $this->updateFieldHealth($field, $visionResult['condition']);
-        }
-
-        if ($diseaseName) {
-            $cropLabel = $field?->crop ?? 'crop';
-            $this->dispatcher->notify(
-                $user,
-                'scan_result',
-                "Scan result: {$diseaseName}",
-                "Your {$cropLabel} scan detected {$diseaseName}. Open AgroAide for treatment recommendations.",
-                [
-                    'scanId' => $scan->id,
-                    'disease' => $diseaseName,
-                    'farmFieldId' => $farmFieldId,
-                ],
-                [
-                    'push' => true,
-                    'dedupeMinutes' => 180,
-                    'dedupeKey' => 'scanId',
-                ],
-            );
-
-            $this->outbreakService->checkForOutbreak($scan);
-        }
+        ProcessCropScan::dispatch($scan->id)->onQueue('diagnosis');
 
         return [
             'scanId' => (string) $scan->id,
-            'analysis' => $visionResult,
+            'scan' => $this->transformScanSummary($scan),
         ];
     }
 
@@ -142,6 +114,12 @@ class FarmImageAnalysisService
             'fieldCrop' => $a->farmField?->crop,
             'summary' => $analysis['summary'] ?? null,
             'confidencePercent' => $analysis['confidencePercent'] ?? null,
+            'processingState' => $a->processing_state,
+            'verificationState' => $a->verification_state,
+            'normalizedConfidence' => $a->normalized_confidence,
+            'provisional' => ! in_array($a->verification_state, ['auto_verified', 'expert_verified'], true),
+            'outbreakEligible' => (bool) $a->outbreak_eligible,
+            'safeErrorCode' => $a->safe_error_code,
             // Served via authenticated API so private-disk images work on devices
             // (APP_URL/localhost public URLs break on real phones).
             'imagePath' => $a->image_path
@@ -168,7 +146,7 @@ class FarmImageAnalysisService
         foreach (['public', 'local'] as $disk) {
             if (Storage::disk($disk)->exists($path)) {
                 return Storage::disk($disk)->response($path, null, [
-                    'Content-Type' => 'image/jpeg',
+                    'Content-Type' => Storage::disk($disk)->mimeType($path) ?: 'application/octet-stream',
                     'Cache-Control' => 'private, max-age=86400',
                 ]);
             }
@@ -178,7 +156,7 @@ class FarmImageAnalysisService
         $privateAbsolute = storage_path('app/private/'.$path);
         if (is_file($privateAbsolute)) {
             return response()->file($privateAbsolute, [
-                'Content-Type' => 'image/jpeg',
+                'Content-Type' => mime_content_type($privateAbsolute) ?: 'application/octet-stream',
                 'Cache-Control' => 'private, max-age=86400',
             ]);
         }
@@ -192,16 +170,19 @@ class FarmImageAnalysisService
             return null;
         }
 
+        $tempPath = null;
         try {
             $imageData = $this->extractRawBase64($base64Image);
             $tempPath = tempnam(sys_get_temp_dir(), 'plantnet_');
-            file_put_contents($tempPath, base64_decode($imageData));
+            $decoded = base64_decode($imageData, true);
+            if ($tempPath === false || $decoded === false) {
+                return null;
+            }
+            file_put_contents($tempPath, $decoded);
 
             $response = Http::timeout(20)
                 ->attach('images', file_get_contents($tempPath), 'scan.jpg')
                 ->post("{$this->plantNetEndpoint}/identify/all?include-related-images=false&no-reject=false&nb-results=5&lang=en&type=kt&api-key={$this->plantNetKey}");
-
-            @unlink($tempPath);
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -227,11 +208,17 @@ class FarmImageAnalysisService
                 ];
             }
 
-            Log::warning('PlantNet API returned non-success', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::warning('PlantNet API returned non-success', ['status' => $response->status()]);
+
             return null;
         } catch (\Exception $e) {
-            Log::warning('PlantNet API call failed', ['error' => $e->getMessage()]);
+            Log::warning('PlantNet API call failed', ['exception' => $e::class]);
+
             return null;
+        } finally {
+            if (is_string($tempPath) && is_file($tempPath)) {
+                @unlink($tempPath);
+            }
         }
     }
 
@@ -270,7 +257,7 @@ class FarmImageAnalysisService
 
             $response = Http::timeout(90)
                 ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->githubModelsKey,
+                    'Authorization' => 'Bearer '.$this->githubModelsKey,
                     'Accept' => 'application/vnd.github+json',
                     'X-GitHub-Api-Version' => $this->githubModelsApiVersion,
                     'Content-Type' => 'application/json',
@@ -299,17 +286,21 @@ class FarmImageAnalysisService
                     if ($plantNetResult && ($plantNetResult['identified'] ?? false)) {
                         $parsed['plantIdentification'] = $plantNetResult['bestMatch'] ?? null;
                     }
+
                     return $parsed;
                 }
 
                 Log::warning('Vision model returned non-JSON', ['raw' => substr($content, 0, 500)]);
+
                 return $this->parseUnstructuredResponse($content, $plantNetResult);
             }
 
-            Log::error('GitHub Models vision API error', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::error('GitHub Models vision API error', ['status' => $response->status()]);
+
             return $this->fallbackResult('AI analysis service is temporarily unavailable. Please try again.');
         } catch (\Exception $e) {
-            Log::error('Vision analysis exception', ['error' => $e->getMessage()]);
+            Log::error('Vision analysis exception', ['exception' => $e::class]);
+
             return $this->fallbackResult('Analysis timed out. The image may be too large, or the service is busy. Please try again.');
         }
     }
@@ -501,13 +492,23 @@ PROMPT;
     {
         try {
             $imageData = $this->extractRawBase64($base64Image);
-            $decoded = base64_decode($imageData);
-            if (! $decoded) {
+            $decoded = base64_decode($imageData, true);
+            if ($decoded === false) {
+                return null;
+            }
+            $info = @getimagesizefromstring($decoded);
+            $extension = match ($info['mime'] ?? null) {
+                'image/png' => 'png',
+                'image/webp' => 'webp',
+                'image/jpeg' => 'jpg',
+                default => null,
+            };
+            if ($extension === null) {
                 return null;
             }
 
             $dir = "farm-scans/{$user->id}";
-            $filename = date('Ymd_His') . '_' . substr(md5(uniqid()), 0, 8) . '.jpg';
+            $filename = date('Ymd_His').'_'.$this->randomName().'.'.$extension;
             $path = "{$dir}/{$filename}";
 
             // Keep on the default local disk; images are served via authenticated API.
@@ -516,6 +517,7 @@ PROMPT;
             return $path;
         } catch (\Exception $e) {
             Log::warning('Failed to store scan image', ['error' => $e->getMessage()]);
+
             return null;
         }
     }
@@ -525,7 +527,13 @@ PROMPT;
         if (str_contains($input, ',')) {
             return explode(',', $input, 2)[1];
         }
+
         return $input;
+    }
+
+    private function randomName(): string
+    {
+        return bin2hex(random_bytes(8));
     }
 
     private function updateFieldHealth(FarmField $field, string $condition): void

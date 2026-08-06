@@ -8,28 +8,39 @@ use App\Models\FarmField;
 use App\Models\FieldTransaction;
 use App\Models\JournalEntry;
 use App\Models\SyncActionLog;
+use App\Models\User;
 use App\Services\GeoAreaService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class SyncController extends Controller
 {
+    private const ACTION_TYPES = [
+        'field.create', 'field.update', 'field.delete',
+        'journal.create', 'journal.update', 'journal.delete',
+        'task.create', 'task.update', 'task.complete', 'task.delete',
+        'transaction.create', 'transaction.update', 'transaction.delete',
+        'boundary.update', 'boundary.delete',
+    ];
+
     public function __construct(private GeoAreaService $geoAreaService) {}
 
     public function delta(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'actions' => ['required', 'array', 'min:1'],
+            'actions' => ['required', 'array', 'min:1', 'max:'.config('security.sync.max_actions')],
             'actions.*.uuid' => ['required', 'uuid'],
             'actions.*.clientTimestamp' => ['required', 'date'],
-            'actions.*.actionType' => ['required', 'string'],
+            'actions.*.actionType' => ['required', 'string', Rule::in(self::ACTION_TYPES)],
             'actions.*.payload' => ['nullable', 'array'],
         ]);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $results = [];
 
@@ -45,7 +56,7 @@ class SyncController extends Controller
         $sinceRaw = $request->query('since');
         $since = $sinceRaw ? Carbon::parse($sinceRaw) : Carbon::createFromTimestamp(0);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $fields = FarmField::where('user_id', $user->id)
@@ -136,7 +147,7 @@ class SyncController extends Controller
         $payload = $action['payload'] ?? [];
         $clientTs = Carbon::parse($action['clientTimestamp']);
 
-        $existingLog = SyncActionLog::where('uuid', $uuid)->first();
+        $existingLog = SyncActionLog::where('user_id', $userId)->where('uuid', $uuid)->first();
         if ($existingLog) {
             return [
                 'uuid' => $uuid,
@@ -148,12 +159,19 @@ class SyncController extends Controller
         }
 
         try {
+            $validationError = $this->validateActionPayload($actionType, $payload, $userId);
+            if ($validationError !== null) {
+                return ['uuid' => $uuid, 'actionType' => $actionType, 'status' => 'rejected', 'message' => $validationError];
+            }
+
             $result = DB::transaction(function () use ($userId, $uuid, $actionType, $payload, $clientTs) {
                 $outcome = match ($actionType) {
                     'field.create' => $this->fieldCreate($userId, $payload, $clientTs),
                     'field.update' => $this->fieldUpdate($userId, $payload, $clientTs),
                     'field.delete' => $this->fieldDelete($userId, $payload, $clientTs),
                     'journal.create' => $this->journalCreate($userId, $payload),
+                    'journal.update' => $this->journalUpdate($userId, $payload, $clientTs),
+                    'journal.delete' => $this->journalDelete($userId, $payload, $clientTs),
                     'task.create' => $this->taskCreate($userId, $payload),
                     'task.update' => $this->taskUpdate($userId, $payload, $clientTs),
                     'task.complete' => $this->taskComplete($userId, $payload, $clientTs),
@@ -162,9 +180,10 @@ class SyncController extends Controller
                     'transaction.update' => $this->transactionUpdate($userId, $payload, $clientTs),
                     'transaction.delete' => $this->transactionDelete($userId, $payload, $clientTs),
                     'boundary.update' => $this->boundaryUpdate($userId, $payload, $clientTs),
+                    'boundary.delete' => $this->boundaryDelete($userId, $payload, $clientTs),
                     default => [
                         'status' => 'rejected',
-                        'message' => "Unknown actionType: {$actionType}",
+                        'message' => 'Unsupported sync action.',
                     ],
                 };
 
@@ -188,11 +207,13 @@ class SyncController extends Controller
                 'actionType' => $actionType,
             ], $result);
         } catch (\Throwable $e) {
+            report($e);
+
             return [
                 'uuid' => $uuid,
                 'actionType' => $actionType,
                 'status' => 'error',
-                'message' => $e->getMessage(),
+                'message' => 'The sync action could not be applied.',
             ];
         }
     }
@@ -294,6 +315,11 @@ class SyncController extends Controller
             }
         }
 
+        $fieldId = $payload['farmFieldId'] ?? null;
+        if ($fieldId && ! FarmField::where('user_id', $userId)->whereKey($fieldId)->exists()) {
+            return ['status' => 'rejected', 'message' => 'Referenced record was not found.'];
+        }
+
         $entry = JournalEntry::create([
             'user_id' => $userId,
             'client_uuid' => $clientUuid,
@@ -303,6 +329,44 @@ class SyncController extends Controller
         ]);
 
         return ['status' => 'applied', 'entityId' => (string) $entry->id];
+    }
+
+    private function journalUpdate(int $userId, array $payload, Carbon $clientTs): array
+    {
+        $entry = $this->findJournal($userId, $payload);
+        if (! $entry) {
+            return ['status' => 'rejected', 'message' => 'Referenced record was not found.'];
+        }
+        if ($this->isConflict($entry->updated_at, $clientTs)) {
+            return ['status' => 'conflict', 'entityId' => (string) $entry->id, 'message' => 'Server version is newer (LWW).'];
+        }
+        if (isset($payload['farmFieldId']) && ! FarmField::where('user_id', $userId)->whereKey($payload['farmFieldId'])->exists()) {
+            return ['status' => 'rejected', 'message' => 'Referenced record was not found.'];
+        }
+        $update = [];
+        foreach (['note' => 'note', 'type' => 'type', 'farmFieldId' => 'farm_field_id'] as $from => $to) {
+            if (array_key_exists($from, $payload)) {
+                $update[$to] = $payload[$from];
+            }
+        }
+        $entry->update($update);
+
+        return ['status' => 'applied', 'entityId' => (string) $entry->id];
+    }
+
+    private function journalDelete(int $userId, array $payload, Carbon $clientTs): array
+    {
+        $entry = $this->findJournal($userId, $payload);
+        if (! $entry) {
+            return ['status' => 'duplicate', 'message' => 'Record already deleted.'];
+        }
+        if ($this->isConflict($entry->updated_at, $clientTs)) {
+            return ['status' => 'conflict', 'entityId' => (string) $entry->id, 'message' => 'Server version is newer (LWW).'];
+        }
+        $id = (string) $entry->id;
+        $entry->delete();
+
+        return ['status' => 'applied', 'entityId' => $id];
     }
 
     /**
@@ -550,6 +614,35 @@ class SyncController extends Controller
 
     /**
      * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function boundaryDelete(int $userId, array $payload, Carbon $clientTs): array
+    {
+        $field = $this->findField($userId, $payload);
+        if (! $field) {
+            return ['status' => 'rejected', 'message' => 'Field not found.'];
+        }
+
+        $compareAt = $field->boundary_updated_at ?? $field->updated_at;
+        if ($this->isConflict($compareAt, $clientTs)) {
+            return [
+                'status' => 'conflict',
+                'entityId' => (string) $field->id,
+                'message' => 'Server boundary is newer (LWW).',
+            ];
+        }
+
+        $field->update([
+            'boundary_geojson' => null,
+            'boundary_updated_at' => now(),
+            'client_uuid' => $payload['clientUuid'] ?? $field->client_uuid,
+        ]);
+
+        return ['status' => 'applied', 'entityId' => (string) $field->id];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
      */
     private function findField(int $userId, array $payload): ?FarmField
     {
@@ -603,6 +696,47 @@ class SyncController extends Controller
         }
 
         return null;
+    }
+
+    private function findJournal(int $userId, array $payload): ?JournalEntry
+    {
+        $query = JournalEntry::where('user_id', $userId);
+        foreach (['id', 'journalId'] as $key) {
+            if (! empty($payload[$key])) {
+                return $query->whereKey($payload[$key])->first();
+            }
+        }
+        if (! empty($payload['clientUuid'])) {
+            return $query->where('client_uuid', $payload['clientUuid'])->first();
+        }
+
+        return null;
+    }
+
+    private function validateActionPayload(string $type, array $payload, int $userId): ?string
+    {
+        if (strlen(json_encode($payload) ?: '') > ((int) config('security.sync.max_payload_kb') * 1024)) {
+            return 'Sync action payload is too large.';
+        }
+
+        $identifier = ['required_without_all:id,fieldId,taskId,transactionId,journalId,clientUuid'];
+        $rules = match ($type) {
+            'field.create' => ['name' => ['required', 'string', 'max:255'], 'crop' => ['required', 'string', 'max:255'], 'areaM2' => ['nullable', 'numeric', 'min:0'], 'clientUuid' => ['nullable', 'uuid']],
+            'field.update' => ['id' => $identifier, 'name' => ['sometimes', 'string', 'max:255'], 'crop' => ['sometimes', 'string', 'max:255'], 'areaM2' => ['sometimes', 'numeric', 'min:0'], 'status' => ['sometimes', 'string', 'max:100']],
+            'field.delete', 'task.delete', 'journal.delete', 'transaction.delete', 'task.complete' => ['id' => $identifier],
+            'journal.create' => ['note' => ['required', 'string', 'max:1000'], 'type' => ['nullable', 'string', 'max:50'], 'farmFieldId' => ['nullable', 'integer'], 'clientUuid' => ['nullable', 'uuid']],
+            'journal.update' => ['id' => $identifier, 'note' => ['sometimes', 'string', 'max:1000'], 'type' => ['sometimes', 'string', 'max:50'], 'farmFieldId' => ['nullable', 'integer']],
+            'task.create' => ['title' => ['required', 'string', 'max:255'], 'description' => ['nullable', 'string', 'max:2000'], 'scheduledDate' => ['required', 'date'], 'durationMinutes' => ['nullable', 'integer', 'between:1,1440'], 'clientUuid' => ['nullable', 'uuid']],
+            'task.update' => ['id' => $identifier, 'title' => ['sometimes', 'string', 'max:255'], 'description' => ['nullable', 'string', 'max:2000'], 'scheduledDate' => ['sometimes', 'date'], 'durationMinutes' => ['sometimes', 'integer', 'between:1,1440']],
+            'transaction.create' => ['farmFieldId' => ['required', 'integer'], 'type' => ['required', Rule::in(['EXPENSE', 'INCOME'])], 'amount' => ['required', 'numeric', 'min:0', 'max:999999999.99'], 'note' => ['nullable', 'string', 'max:1000'], 'clientUuid' => ['nullable', 'uuid']],
+            'transaction.update' => ['id' => $identifier, 'type' => ['sometimes', Rule::in(['EXPENSE', 'INCOME'])], 'amount' => ['sometimes', 'numeric', 'min:0', 'max:999999999.99'], 'note' => ['nullable', 'string', 'max:1000']],
+            'boundary.update' => ['id' => $identifier, 'boundaryGeojson' => ['required_without:geojson', 'array'], 'geojson' => ['required_without:boundaryGeojson', 'array'], 'areaM2' => ['nullable', 'numeric', 'min:0']],
+            'boundary.delete' => ['id' => $identifier],
+            default => [],
+        };
+        $validator = Validator::make($payload, $rules);
+
+        return $validator->fails() ? 'Sync action payload is invalid.' : null;
     }
 
     private function isConflict(?CarbonInterface $serverUpdatedAt, Carbon $clientTs): bool

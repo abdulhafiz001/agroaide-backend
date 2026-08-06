@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\FarmField;
 use App\Models\User;
-use App\Services\TranslationService;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -117,7 +116,7 @@ class InputEstimateService
             return $fallback;
         }
 
-        $prompt = "Rewrite these farm input numbers into 3-5 short friendly sentences for a Nigerian farmer. "
+        $prompt = 'Rewrite these farm input numbers into 3-5 short friendly sentences for a Nigerian farmer. '
             ."Use ONLY these numbers — do not invent different amounts. Language: {$langName}. "
             ."Include the disclaimer that it is a guide and may not be 100% correct.\n\n"
             .json_encode($numbers, JSON_PRETTY_PRINT);

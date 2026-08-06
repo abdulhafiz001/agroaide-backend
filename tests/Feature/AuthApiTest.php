@@ -20,6 +20,8 @@ class AuthApiTest extends TestCase
             'crops' => ['Maize', 'Cassava'],
             'farmLatitude' => 9.05,
             'farmLongitude' => 7.49,
+            'termsVersion' => config('legal.terms.version'),
+            'privacyVersion' => config('legal.privacy.version'),
         ]);
 
         $response->assertCreated()

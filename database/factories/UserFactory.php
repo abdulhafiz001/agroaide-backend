@@ -2,12 +2,13 @@
 
 namespace Database\Factories;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\User>
+ * @extends Factory<User>
  */
 class UserFactory extends Factory
 {
@@ -15,6 +16,19 @@ class UserFactory extends Factory
      * The current password being used by the factory.
      */
     protected static ?string $password;
+
+    public function configure(): static
+    {
+        return $this->afterCreating(function (User $user): void {
+            $user->consents()->create([
+                'terms_version' => config('legal.terms.version'),
+                'privacy_version' => config('legal.privacy.version'),
+                'research_version' => config('legal.research_consent.version'),
+                'research_consent' => false,
+                'consented_at' => now(),
+            ]);
+        });
+    }
 
     /**
      * Define the model's default state.

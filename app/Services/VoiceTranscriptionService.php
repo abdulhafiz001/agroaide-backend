@@ -8,7 +8,9 @@ use Illuminate\Support\Facades\Log;
 class VoiceTranscriptionService
 {
     private string $apiKey;
+
     private string $endpoint;
+
     private string $model;
 
     public function __construct()
@@ -24,10 +26,9 @@ class VoiceTranscriptionService
     }
 
     /**
-     * Transcribe audio from base64-encoded data.
-     * Supports m4a, wav, mp3, webm, ogg formats.
+     * @param  array{bytes:string,mime:string,extension:string}  $media
      */
-    public function transcribe(string $audioBase64, string $languageHint = 'en'): array
+    public function transcribe(array $media, string $languageHint = 'en'): array
     {
         if (! $this->isAvailable()) {
             return [
@@ -36,48 +37,45 @@ class VoiceTranscriptionService
             ];
         }
 
+        $tempPath = null;
         try {
-            $audioData = $this->extractRawBase64($audioBase64);
-            $decoded = base64_decode($audioData);
-            if (! $decoded) {
-                return ['success' => false, 'error' => 'Invalid audio data.'];
+            $basePath = tempnam(sys_get_temp_dir(), 'voice_');
+            if ($basePath === false) {
+                return ['success' => false, 'error' => 'Voice processing error. Please try again.'];
             }
-
-            $tempPath = tempnam(sys_get_temp_dir(), 'voice_') . '.m4a';
-            file_put_contents($tempPath, $decoded);
+            $tempPath = $basePath.'.'.$media['extension'];
+            rename($basePath, $tempPath);
+            file_put_contents($tempPath, $media['bytes']);
 
             $langMap = ['en' => 'en', 'ha' => 'ha', 'yo' => 'yo', 'pcm' => 'en'];
             $whisperLang = $langMap[$languageHint] ?? 'en';
 
             $response = Http::timeout(30)
-                ->withHeaders(['Authorization' => 'Bearer ' . $this->apiKey])
-                ->attach('file', file_get_contents($tempPath), 'audio.m4a')
+                ->withHeaders(['Authorization' => 'Bearer '.$this->apiKey])
+                ->attach('file', file_get_contents($tempPath), 'audio.'.$media['extension'], ['Content-Type' => $media['mime']])
                 ->post($this->endpoint, [
                     'model' => $this->model,
                     'language' => $whisperLang,
                     'response_format' => 'json',
                 ]);
 
-            @unlink($tempPath);
-
             if ($response->successful()) {
                 $text = $response->json('text') ?? '';
+
                 return ['success' => true, 'text' => trim($text)];
             }
 
-            Log::warning('Groq Whisper API error', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::warning('Groq Whisper API error', ['status' => $response->status()]);
+
             return ['success' => false, 'error' => 'Transcription failed. Please try again.'];
         } catch (\Exception $e) {
-            Log::error('Voice transcription exception', ['error' => $e->getMessage()]);
-            return ['success' => false, 'error' => 'Voice processing error. Please try again.'];
-        }
-    }
+            Log::error('Voice transcription exception', ['exception' => $e::class]);
 
-    private function extractRawBase64(string $input): string
-    {
-        if (str_contains($input, ',')) {
-            return explode(',', $input, 2)[1];
+            return ['success' => false, 'error' => 'Voice processing error. Please try again.'];
+        } finally {
+            if (is_string($tempPath) && is_file($tempPath)) {
+                @unlink($tempPath);
+            }
         }
-        return $input;
     }
 }

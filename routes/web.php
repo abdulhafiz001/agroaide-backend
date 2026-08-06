@@ -1,7 +1,36 @@
 <?php
 
+use App\Http\Controllers\StaffController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
+});
+
+Route::view('/legal/terms', 'legal.terms')->name('legal.terms');
+Route::view('/legal/privacy', 'legal.privacy')->name('legal.privacy');
+
+Route::middleware('guest')->group(function (): void {
+    Route::get('/staff/login', [StaffController::class, 'login'])->name('staff.login');
+    Route::post('/staff/login', [StaffController::class, 'authenticate'])
+        ->middleware('throttle:staff-login')
+        ->name('staff.authenticate');
+});
+Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
+    Route::get('/', [StaffController::class, 'dashboard'])->name('staff.dashboard');
+    Route::post('/logout', [StaffController::class, 'logout'])->name('staff.logout');
+    Route::get('/scans/{scan}/image', [StaffController::class, 'scanImage'])->name('staff.scans.image');
+    Route::post('/scans/{scan}/review', [StaffController::class, 'review'])->name('staff.scans.review');
+    Route::get('/evaluations/compare', [StaffController::class, 'compare'])->name('staff.evaluations.compare');
+    Route::get('/evaluations/datasets/{dataset}', [StaffController::class, 'dataset'])->name('staff.evaluations.datasets.show');
+    Route::get('/evaluations/runs/{run}', [StaffController::class, 'run'])->name('staff.evaluations.runs.show');
+
+    Route::middleware('staff:admin')->group(function (): void {
+        Route::get('/admin', [StaffController::class, 'admin'])->name('staff.admin');
+        Route::post('/evaluations/datasets/{dataset}/runs', [StaffController::class, 'queueRun'])->name('staff.evaluations.runs.store');
+        Route::post('/confidence-policies', [StaffController::class, 'createPolicy'])->name('staff.policies.store');
+        Route::post('/confidence-policies/{policy}/activate', [StaffController::class, 'activatePolicy'])->name('staff.policies.activate');
+        Route::patch('/users/{user}/role', [StaffController::class, 'assignRole'])->name('staff.users.role');
+        Route::get('/audit', [StaffController::class, 'audit'])->name('staff.audit');
+    });
 });

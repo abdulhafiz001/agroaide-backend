@@ -5,8 +5,15 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\FarmField;
 use App\Models\FieldTransaction;
+use App\Models\User;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class EconomicsController extends Controller
 {
@@ -92,15 +99,33 @@ class EconomicsController extends Controller
         ]);
 
         $update = [];
-        if (isset($validated['type'])) $update['type'] = $validated['type'];
-        if (isset($validated['category'])) $update['category'] = $validated['category'];
-        if (isset($validated['amount'])) $update['amount'] = $validated['amount'];
-        if (array_key_exists('quantity', $validated)) $update['quantity'] = $validated['quantity'];
-        if (array_key_exists('unit', $validated)) $update['unit'] = $validated['unit'];
-        if (isset($validated['occurredOn'])) $update['occurred_on'] = $validated['occurredOn'];
-        if (array_key_exists('note', $validated)) $update['note'] = $validated['note'];
-        if (array_key_exists('saleItem', $validated)) $update['sale_item'] = $validated['saleItem'];
-        if (array_key_exists('categoryOther', $validated)) $update['category_other'] = $validated['categoryOther'];
+        if (isset($validated['type'])) {
+            $update['type'] = $validated['type'];
+        }
+        if (isset($validated['category'])) {
+            $update['category'] = $validated['category'];
+        }
+        if (isset($validated['amount'])) {
+            $update['amount'] = $validated['amount'];
+        }
+        if (array_key_exists('quantity', $validated)) {
+            $update['quantity'] = $validated['quantity'];
+        }
+        if (array_key_exists('unit', $validated)) {
+            $update['unit'] = $validated['unit'];
+        }
+        if (isset($validated['occurredOn'])) {
+            $update['occurred_on'] = $validated['occurredOn'];
+        }
+        if (array_key_exists('note', $validated)) {
+            $update['note'] = $validated['note'];
+        }
+        if (array_key_exists('saleItem', $validated)) {
+            $update['sale_item'] = $validated['saleItem'];
+        }
+        if (array_key_exists('categoryOther', $validated)) {
+            $update['category_other'] = $validated['categoryOther'];
+        }
 
         $transaction->update($update);
 
@@ -162,7 +187,7 @@ class EconomicsController extends Controller
 
     public function summary(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $fields = $user->farmFields()->get();
@@ -227,14 +252,14 @@ class EconomicsController extends Controller
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, FieldTransaction>  $transactions
+     * @param  Collection<int, FieldTransaction>  $transactions
      * @param  array<string, mixed>  $economics
      */
     private function exportPdf(FarmField $field, $transactions, array $economics, int $userId, Request $request): JsonResponse
     {
         $filename = sprintf('field-%d-economics-%s.pdf', $field->id, now()->format('Ymd'));
 
-        if (! class_exists(\Barryvdh\DomPDF\Facade\Pdf::class)) {
+        if (! class_exists(Pdf::class)) {
             $html = $this->buildExportHtml($field, $transactions, $economics);
 
             return response()->json([
@@ -256,7 +281,7 @@ class EconomicsController extends Controller
                     ? $this->buildMinimalExportHtml($field, $transactions, $economics)
                     : $this->buildExportHtml($field, $transactions, $economics);
 
-                $binary = \Barryvdh\DomPDF\Facade\Pdf::loadHTML($html)
+                $binary = Pdf::loadHTML($html)
                     ->setPaper('a4', 'portrait')
                     ->setOption('defaultFont', 'Helvetica')
                     ->setOption('isRemoteEnabled', false)
@@ -284,21 +309,21 @@ class EconomicsController extends Controller
 
         // Optional signed URL — never fail the export if this part breaks (route cache / APP_URL).
         try {
-            $storedName = sprintf('field-%d-%s-%s.pdf', $field->id, now()->format('YmdHis'), \Illuminate\Support\Str::random(12));
+            $storedName = sprintf('field-%d-%s-%s.pdf', $field->id, now()->format('YmdHis'), Str::random(12));
             $storagePath = "exports/{$userId}/{$storedName}";
-            \Illuminate\Support\Facades\Storage::disk('local')->put($storagePath, $binary);
+            Storage::disk('local')->put($storagePath, $binary);
 
             $rootUrl = rtrim($request->getSchemeAndHttpHost(), '/');
             $previousRoot = config('app.url');
-            \Illuminate\Support\Facades\URL::forceRootUrl($rootUrl);
+            URL::forceRootUrl($rootUrl);
             try {
-                $payload['downloadUrl'] = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                $payload['downloadUrl'] = URL::temporarySignedRoute(
                     'economics.export.download',
                     now()->addMinutes(30),
                     ['userId' => $userId, 'file' => $storedName],
                 );
             } finally {
-                \Illuminate\Support\Facades\URL::forceRootUrl($previousRoot ?: $rootUrl);
+                URL::forceRootUrl($previousRoot ?: $rootUrl);
             }
         } catch (\Throwable $e) {
             report($e);
@@ -310,7 +335,7 @@ class EconomicsController extends Controller
     /**
      * DomPDF-safe minimal report (no logo, core fonts only).
      *
-     * @param  \Illuminate\Support\Collection<int, FieldTransaction>  $transactions
+     * @param  Collection<int, FieldTransaction>  $transactions
      * @param  array<string, mixed>  $economics
      */
     private function buildMinimalExportHtml(FarmField $field, $transactions, array $economics): string
@@ -371,18 +396,18 @@ th{background:#1b4332;color:#fff;}
 HTML;
     }
 
-    public function downloadExport(Request $request, int $userId, string $file): \Symfony\Component\HttpFoundation\StreamedResponse
+    public function downloadExport(Request $request, int $userId, string $file): StreamedResponse
     {
         if (! preg_match('/^field-\d+-\d{14}-[A-Za-z0-9]+\.pdf$/', $file)) {
             abort(404);
         }
 
         $storagePath = "exports/{$userId}/{$file}";
-        if (! \Illuminate\Support\Facades\Storage::disk('local')->exists($storagePath)) {
+        if (! Storage::disk('local')->exists($storagePath)) {
             abort(404);
         }
 
-        return \Illuminate\Support\Facades\Storage::disk('local')->download(
+        return Storage::disk('local')->download(
             $storagePath,
             $file,
             ['Content-Type' => 'application/pdf'],
@@ -446,7 +471,7 @@ HTML;
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, FieldTransaction>  $transactions
+     * @param  Collection<int, FieldTransaction>  $transactions
      * @param  array<string, mixed>  $economics
      */
     private function buildExportHtml(FarmField $field, $transactions, array $economics): string

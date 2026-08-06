@@ -8,6 +8,8 @@ use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\JournalEntry;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -15,8 +17,11 @@ use Illuminate\Support\Facades\Log;
 class AiAdvisorService
 {
     private string $apiKey;
+
     private string $model;
+
     private string $endpoint;
+
     private string $apiVersion;
 
     public function __construct(private WeatherService $weatherService)
@@ -168,6 +173,22 @@ class AiAdvisorService
         $lat = $user->farm_latitude;
         $lng = $user->farm_longitude;
         $today = now()->toDateString();
+        $depth = $user->ai_response_depth ?? 'balanced';
+        $risk = $user->ai_risk_tolerance ?? 'balanced';
+        $voiceTips = (bool) ($user->ai_voice_tips ?? true);
+        $depthInstruction = match ($depth) {
+            'concise' => 'Answer in 1-2 short paragraphs or at most 4 bullets.',
+            'deep' => 'Give a thorough explanation with reasoning, trade-offs, and ordered steps.',
+            default => 'Give a practical answer in 2-4 short paragraphs with bullets when useful.',
+        };
+        $riskInstruction = match ($risk) {
+            'cautious' => 'Prefer low-risk, reversible actions and clearly identify uncertainty before costly treatment.',
+            'bold' => 'When evidence supports it, recommend decisive action while stating the main downside.',
+            default => 'Balance likely benefits, cost, uncertainty, and reversibility.',
+        };
+        $voiceInstruction = $voiceTips
+            ? 'Include a brief speakable tip when it naturally helps.'
+            : 'Do not add optional voice or read-aloud tips.';
 
         $weatherBlock = $this->buildWeatherContext($user);
         $fieldsBlock = $this->buildFieldsContext($user);
@@ -209,7 +230,10 @@ CRITICAL RULES:
 8. For Nigerian farming, consider local seasons, markets, and practices.
 9. Never invent pesticide dosages or medical/legal advice. If unsure about non-weather facts, say so honestly.
 10. Prefer decisions tied to today's tasks, field health, recent crop scans, and the 7-day forecast when relevant.
-11. When the farmer asks about a scan, reference the latest matching scan findings (condition, disease, recommendations) and expand with prevention/treatment steps.
+11. When the farmer asks about a scan, reference the latest matching scan findings. Any scan not marked auto_verified or expert_verified is provisional: explicitly call it provisional and recommend retake/expert review before treatment or outbreak conclusions.
+12. RESPONSE DEPTH ({$depth}): {$depthInstruction}
+13. RISK STYLE ({$risk}): {$riskInstruction}
+14. VOICE TIPS: {$voiceInstruction}
 PROMPT;
 
         if ($lang !== 'en') {
@@ -371,7 +395,7 @@ PROMPT;
             return "RECENT CROP SCANS:\n- No crop scans yet.\n";
         }
 
-        $lines = ['RECENT CROP SCANS (from the in-app AI crop scanner — treat as ground truth for follow-up questions):'];
+        $lines = ['RECENT CROP SCANS (verified results may guide decisions; provisional results are not ground truth):'];
         foreach ($scans as $scan) {
             $analysis = is_array($scan->result_json) ? $scan->result_json : [];
             $date = optional($scan->created_at)?->toDateString() ?? 'n/a';
@@ -385,11 +409,15 @@ PROMPT;
                 $immediate = array_slice($analysis['recommendations']['immediate'], 0, 2);
             }
             $immediateText = $immediate ? implode('; ', $immediate) : 'n/a';
+            $verification = $scan->verification_state ?? 'legacy_ineligible';
+            $certainty = in_array($verification, ['auto_verified', 'expert_verified'], true) ? 'verified' : 'PROVISIONAL';
 
             $lines[] = sprintf(
-                '- Scan #%s on %s | field=%s (%s) | condition=%s | disease=%s | summary=%s | immediate=%s',
+                '- Scan #%s on %s | status=%s (%s) | field=%s (%s) | condition=%s | disease=%s | summary=%s | immediate=%s',
                 $scan->id,
                 $date,
+                $certainty,
+                $verification,
                 $field,
                 $crop,
                 $condition,
@@ -402,7 +430,7 @@ PROMPT;
         return implode("\n", $lines)."\n";
     }
 
-    private function getRecentConversation(User $user, int $limit = 10): \Illuminate\Support\Collection
+    private function getRecentConversation(User $user, int $limit = 10): Collection
     {
         return AdvisorConversation::where('user_id', $user->id)
             ->orderBy('created_at', 'desc')
@@ -446,11 +474,7 @@ PROMPT;
                 return trim($content);
             }
 
-            Log::error('GitHub Models API error', [
-                'status' => $response->status(),
-                'body' => $response->body(),
-                'model' => $this->model,
-            ]);
+            Log::error('GitHub Models API error', ['status' => $response->status(), 'model' => $this->model]);
 
             if ($response->status() === 401) {
                 return 'AI advisor is not set up correctly. Please contact support.';
@@ -460,18 +484,14 @@ PROMPT;
             }
 
             return 'I apologize, but I\'m having trouble connecting right now. Please try again in a moment.';
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+        } catch (ConnectionException $e) {
             Log::error('GitHub Models connection failed', ['message' => $e->getMessage()]);
 
             return 'Connection to AI service timed out. Please check your internet and try again.';
         } catch (\Exception $e) {
-            Log::error('GitHub Models exception', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
+            Log::error('GitHub Models exception', ['exception' => $e::class]);
 
             return 'I\'m temporarily unavailable. Please try again shortly.';
         }
     }
-
 }

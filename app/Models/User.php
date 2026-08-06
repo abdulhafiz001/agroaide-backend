@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -10,14 +11,16 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
+    /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
     protected $fillable = [
         'name',
         'email',
         'password',
+        'role',
         'phone_number',
+        'phone_normalized',
         'farm_name',
         'farm_location',
         'farm_latitude',
@@ -32,12 +35,16 @@ class User extends Authenticatable
         'preferred_language',
         'push_token',
         'notification_preferences',
+        'ai_response_depth',
+        'ai_risk_tolerance',
+        'ai_voice_tips',
     ];
 
     protected $hidden = [
         'password',
         'remember_token',
         'push_token',
+        'phone_normalized',
     ];
 
     protected function casts(): array
@@ -50,6 +57,7 @@ class User extends Authenticatable
             'farm_size_m2' => 'float',
             'farm_latitude' => 'float',
             'farm_longitude' => 'float',
+            'ai_voice_tips' => 'boolean',
         ];
     }
 
@@ -96,5 +104,20 @@ class User extends Authenticatable
     public function syncActionLogs(): HasMany
     {
         return $this->hasMany(SyncActionLog::class);
+    }
+
+    public function consents(): HasMany
+    {
+        return $this->hasMany(UserConsent::class);
+    }
+
+    public function isStaff(): bool
+    {
+        return in_array($this->role, ['agronomist', 'admin'], true);
+    }
+
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
     }
 }

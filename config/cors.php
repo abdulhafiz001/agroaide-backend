@@ -5,7 +5,8 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => explode(',', env('CORS_ALLOWED_ORIGINS', '*')),
+    // Native clients do not need CORS; same-origin staff pages remain allowed by browsers.
+    'allowed_origins' => [],
 
     'allowed_origins_patterns' => [],
 

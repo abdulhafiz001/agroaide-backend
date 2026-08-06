@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
+use App\Models\User;
 use App\Services\NotificationDispatcher;
 use App\Services\WeatherService;
 use Illuminate\Http\JsonResponse;
@@ -18,7 +19,7 @@ class NotificationController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $this->autoGenerateNotifications($user);

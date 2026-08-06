@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
+use App\Models\User;
 use App\Services\AiAdvisorService;
 use App\Services\DiseaseOutbreakService;
 use App\Services\TranslationService;
@@ -26,7 +27,7 @@ class DashboardController extends Controller
      */
     public function snapshot(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $profileComplete = $this->isProfileComplete($user);
@@ -129,7 +130,7 @@ class DashboardController extends Controller
 
     public function aiInsights(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         if (! $this->isProfileComplete($user)) {

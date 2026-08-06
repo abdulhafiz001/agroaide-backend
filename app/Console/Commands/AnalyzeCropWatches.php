@@ -93,12 +93,14 @@ class AnalyzeCropWatches extends Command
                     $sent++;
                 }
                 $watch->delete();
+
                 continue;
             }
 
             if ($this->seasonalCalendar->seasonPassedThisYear($cropKey, $zone)) {
                 if ($watch->last_analysis_status === 'season_passed') {
                     $watch->update(['last_analyzed_at' => now()]);
+
                     continue;
                 }
 
@@ -133,6 +135,7 @@ class AnalyzeCropWatches extends Command
                 if ($notification) {
                     $sent++;
                 }
+
                 continue;
             }
 
@@ -143,6 +146,7 @@ class AnalyzeCropWatches extends Command
                     'last_analysis_status' => 'waiting',
                     'last_analyzed_at' => now(),
                 ]);
+
                 continue;
             }
 
@@ -152,6 +156,7 @@ class AnalyzeCropWatches extends Command
                     'best_plant_date' => $best->toDateString(),
                     'last_analyzed_at' => now(),
                 ]);
+
                 continue;
             }
 

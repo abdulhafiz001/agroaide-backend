@@ -7,6 +7,7 @@ use App\Mail\PasswordResetCodeMail;
 use App\Mail\WelcomeMail;
 use App\Models\PasswordResetOtp;
 use App\Models\User;
+use App\Models\UserConsent;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,13 +41,22 @@ class AuthController extends Controller
             'farmLatitude' => ['nullable', 'numeric', 'between:-90,90'],
             'farmLongitude' => ['nullable', 'numeric', 'between:-180,180'],
             'preferredLanguage' => ['nullable', 'string', Rule::in(['en', 'ha', 'yo', 'pcm'])],
+            'termsVersion' => ['required', 'in:'.config('legal.terms.version')],
+            'privacyVersion' => ['required', 'in:'.config('legal.privacy.version')],
+            'researchConsent' => ['sometimes', 'boolean'],
         ]);
+        $normalizedPhone = filled($validated['phoneNumber'] ?? null) ? PhoneNumber::normalize($validated['phoneNumber']) : null;
+        if ($normalizedPhone && User::where('phone_normalized', $normalizedPhone)->exists()) {
+            throw ValidationException::withMessages(['phoneNumber' => ['The phone number has already been taken.']]);
+        }
 
         $user = User::create([
             'name' => $validated['fullName'],
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
+            'role' => 'farmer',
             'phone_number' => $validated['phoneNumber'] ?? null,
+            'phone_normalized' => $normalizedPhone,
             'farm_name' => $validated['farmName'] ?? null,
             'farm_location' => $validated['farmLocation'] ?? null,
             'farm_latitude' => $validated['farmLatitude'] ?? null,
@@ -57,6 +67,17 @@ class AuthController extends Controller
             'soil_type' => $validated['soilType'] ?? 'Loamy',
             'irrigation_access' => $validated['irrigationAccess'] ?? 'drip',
             'preferred_language' => $validated['preferredLanguage'] ?? 'en',
+        ]);
+
+        UserConsent::create([
+            'user_id' => $user->id,
+            'terms_version' => $validated['termsVersion'],
+            'privacy_version' => $validated['privacyVersion'],
+            'research_version' => config('legal.research_consent.version'),
+            'research_consent' => $validated['researchConsent'] ?? false,
+            'consented_at' => now(),
+            'ip_address' => $request->ip(),
+            'user_agent' => substr((string) $request->userAgent(), 0, 512),
         ]);
 
         $user->tokens()->delete();
@@ -102,7 +123,7 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         return response()->json([
@@ -121,7 +142,7 @@ class AuthController extends Controller
 
     public function updateProfile(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $validated = $request->validate([
@@ -146,6 +167,9 @@ class AuthController extends Controller
             'experienceLevel' => ['nullable', Rule::in(['beginner', 'intermediate', 'advanced'])],
             'soilType' => ['nullable', 'string', 'max:100'],
             'irrigationAccess' => ['nullable', Rule::in(['rain-fed', 'drip', 'sprinkler', 'flood'])],
+            'aiResponseDepth' => ['nullable', Rule::in(['concise', 'balanced', 'deep'])],
+            'aiRiskTolerance' => ['nullable', Rule::in(['cautious', 'balanced', 'bold'])],
+            'voiceTips' => ['nullable', 'boolean'],
         ]);
 
         $updateData = [];
@@ -156,7 +180,12 @@ class AuthController extends Controller
             $updateData['email'] = $validated['email'];
         }
         if (array_key_exists('phoneNumber', $validated)) {
+            $normalizedPhone = filled($validated['phoneNumber']) ? PhoneNumber::normalize($validated['phoneNumber']) : null;
+            if ($normalizedPhone && User::where('phone_normalized', $normalizedPhone)->whereKeyNot($user->id)->exists()) {
+                throw ValidationException::withMessages(['phoneNumber' => ['The phone number has already been taken.']]);
+            }
             $updateData['phone_number'] = $validated['phoneNumber'];
+            $updateData['phone_normalized'] = $normalizedPhone;
         }
         if (array_key_exists('farmName', $validated)) {
             $updateData['farm_name'] = $validated['farmName'];
@@ -188,6 +217,15 @@ class AuthController extends Controller
         if (isset($validated['preferredLanguage'])) {
             $updateData['preferred_language'] = $validated['preferredLanguage'];
         }
+        if (isset($validated['aiResponseDepth'])) {
+            $updateData['ai_response_depth'] = $validated['aiResponseDepth'];
+        }
+        if (isset($validated['aiRiskTolerance'])) {
+            $updateData['ai_risk_tolerance'] = $validated['aiRiskTolerance'];
+        }
+        if (array_key_exists('voiceTips', $validated)) {
+            $updateData['ai_voice_tips'] = $validated['voiceTips'];
+        }
         if (array_key_exists('pushToken', $validated)) {
             $updateData['push_token'] = $validated['pushToken'];
         }
@@ -217,7 +255,7 @@ class AuthController extends Controller
             'newPassword' => ['required', 'string', 'min:8', 'confirmed'],
         ]);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         if (! Hash::check($validated['currentPassword'], $user->password)) {
@@ -227,6 +265,7 @@ class AuthController extends Controller
         }
 
         $user->update(['password' => Hash::make($validated['newPassword'])]);
+        $user->tokens()->delete();
 
         return response()->json(['message' => 'Password changed successfully.']);
     }
@@ -300,7 +339,7 @@ class AuthController extends Controller
             ]);
         }
 
-        /** @var \App\Models\PasswordResetOtp|null $otp */
+        /** @var PasswordResetOtp|null $otp */
         $otp = PasswordResetOtp::where('user_id', $user->id)
             ->latest('id')
             ->first();
@@ -351,11 +390,7 @@ class AuthController extends Controller
             return null;
         }
 
-        return User::query()
-            ->whereNotNull('phone_number')
-            ->where('phone_number', '!=', '')
-            ->get()
-            ->first(fn (User $user) => PhoneNumber::matches($user->phone_number, $identifier));
+        return User::where('phone_normalized', $normalized)->first();
     }
 
     private function transformUserProfile(User $user): array
@@ -378,6 +413,13 @@ class AuthController extends Controller
             'farmLongitude' => $user->farm_longitude,
             'preferredLanguage' => $user->preferred_language ?? 'en',
             'notificationPreferences' => $this->resolveNotificationPreferences($user),
+            'aiResponseDepth' => $user->ai_response_depth ?? 'balanced',
+            'aiRiskTolerance' => $user->ai_risk_tolerance ?? 'balanced',
+            'voiceTips' => (bool) ($user->ai_voice_tips ?? true),
+            'consentRequired' => ! $user->consents()
+                ->where('terms_version', config('legal.terms.version'))
+                ->where('privacy_version', config('legal.privacy.version'))
+                ->exists(),
         ];
     }
 

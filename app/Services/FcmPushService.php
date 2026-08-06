@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Log;
 class FcmPushService
 {
     private const TOKEN_CACHE_KEY = 'fcm_access_token';
+
     private const SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
     /**

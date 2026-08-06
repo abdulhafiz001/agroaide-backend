@@ -10,17 +10,6 @@ use Illuminate\Support\Facades\DB;
 
 class DiseaseOutbreakService
 {
-    /** Farmers with same disease + same crop inside radius → local warning */
-    private const WARNING_THRESHOLD = 3;
-
-    /** Farmers with same disease + same crop inside radius → outbreak alert */
-    private const OUTBREAK_THRESHOLD = 10;
-
-    /** Proximity radius in kilometers (Haversine / great-circle). */
-    private const RADIUS_KM = 5;
-
-    private const LOOKBACK_DAYS = 14;
-
     public function __construct(private NotificationDispatcher $dispatcher) {}
 
     /**
@@ -37,7 +26,8 @@ class DiseaseOutbreakService
      */
     public function checkForOutbreak(FarmImageAnalysis $scan): void
     {
-        if (! $scan->disease_name || ! $scan->latitude || ! $scan->longitude) {
+        if (! $scan->outbreak_eligible || ! in_array($scan->verification_state, ['auto_verified', 'expert_verified'], true)
+            || ! $scan->effective_disease_label_id || ! $scan->disease_name || ! $scan->latitude || ! $scan->longitude) {
             return;
         }
 
@@ -54,7 +44,8 @@ class DiseaseOutbreakService
             (float) $scan->longitude,
         );
 
-        if ($farmerCount >= self::OUTBREAK_THRESHOLD) {
+        if ($farmerCount >= config('privacy.outbreak.outbreak_threshold')) {
+            $this->recordAggregate($scan, $crop, $farmerCount, 'outbreak');
             $this->notifyNearbyGrowers(
                 $scan->disease_name,
                 $crop,
@@ -67,7 +58,8 @@ class DiseaseOutbreakService
             return;
         }
 
-        if ($farmerCount >= self::WARNING_THRESHOLD) {
+        if ($farmerCount >= config('privacy.outbreak.warning_threshold')) {
+            $this->recordAggregate($scan, $crop, $farmerCount, 'warning');
             $this->notifyNearbyGrowers(
                 $scan->disease_name,
                 $crop,
@@ -85,12 +77,14 @@ class DiseaseOutbreakService
     public function runOutbreakDetection(): int
     {
         $alertsTriggered = 0;
-        $cutoff = now()->subDays(self::LOOKBACK_DAYS);
+        $cutoff = now()->subDays(config('privacy.outbreak.detection_lookback_days'));
 
         $scans = FarmImageAnalysis::with(['farmField', 'user'])
             ->whereNotNull('disease_name')
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->where('outbreak_eligible', true)
+            ->whereIn('verification_state', ['auto_verified', 'expert_verified'])
             ->where('created_at', '>=', $cutoff)
             ->get();
 
@@ -119,7 +113,7 @@ class DiseaseOutbreakService
                 $cluster['lng'],
             );
 
-            if ($count >= self::OUTBREAK_THRESHOLD) {
+            if ($count >= config('privacy.outbreak.outbreak_threshold')) {
                 $this->notifyNearbyGrowers(
                     $cluster['disease'],
                     $cluster['crop'],
@@ -129,7 +123,7 @@ class DiseaseOutbreakService
                     'outbreak',
                 );
                 $alertsTriggered++;
-            } elseif ($count >= self::WARNING_THRESHOLD) {
+            } elseif ($count >= config('privacy.outbreak.warning_threshold')) {
                 $this->notifyNearbyGrowers(
                     $cluster['disease'],
                     $cluster['crop'],
@@ -147,25 +141,42 @@ class DiseaseOutbreakService
 
     public function getHeatmapData(): array
     {
-        $cutoff = now()->subDays(30);
+        $cutoff = now()->subDays(config('privacy.outbreak.heatmap_lookback_days'));
+        $grid = (float) config('privacy.outbreak.grid_degrees');
+        $minimum = (int) config('privacy.outbreak.minimum_distinct_users');
 
         return FarmImageAnalysis::whereNotNull('disease_name')
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->where('outbreak_eligible', true)
+            ->whereIn('verification_state', ['auto_verified', 'expert_verified'])
             ->where('created_at', '>=', $cutoff)
-            ->select('latitude', 'longitude', 'disease_name', 'created_at', DB::raw('COUNT(*) as report_count'))
-            ->groupBy('latitude', 'longitude', 'disease_name', 'created_at')
-            ->orderBy('created_at', 'desc')
-            ->limit(500)
+            ->select('user_id', 'latitude', 'longitude', 'disease_name', 'created_at')
             ->get()
-            ->map(fn ($row) => [
-                'latitude' => (float) $row->latitude,
-                'longitude' => (float) $row->longitude,
-                'disease' => $row->disease_name,
-                'count' => $row->report_count,
-                'date' => $row->created_at->toIso8601String(),
-            ])
-            ->toArray();
+            ->groupBy(fn ($row) => implode('|', [
+                strtolower(trim($row->disease_name)),
+                floor(((float) $row->latitude) / $grid),
+                floor(((float) $row->longitude) / $grid),
+            ]))
+            ->filter(fn ($rows) => $rows->pluck('user_id')->unique()->count() >= $minimum)
+            ->map(function ($rows) use ($grid) {
+                $first = $rows->first();
+                $latCell = floor(((float) $first->latitude) / $grid);
+                $lngCell = floor(((float) $first->longitude) / $grid);
+
+                return [
+                    'gridLatitude' => round(($latCell + 0.5) * $grid, 3),
+                    'gridLongitude' => round(($lngCell + 0.5) * $grid, 3),
+                    'gridSizeDegrees' => $grid,
+                    'disease' => $first->disease_name,
+                    'reportCount' => $rows->count(),
+                    'farmerCount' => $rows->pluck('user_id')->unique()->count(),
+                    'latestDate' => $rows->max('created_at')->toDateString(),
+                ];
+            })
+            ->values()
+            ->take(500)
+            ->all();
     }
 
     public function getAlertsForUser(User $user): array
@@ -192,14 +203,16 @@ class DiseaseOutbreakService
 
     private function countNearbySameCropFarmers(string $disease, string $crop, float $lat, float $lng): int
     {
-        $cutoff = now()->subDays(self::LOOKBACK_DAYS);
+        $cutoff = now()->subDays(config('privacy.outbreak.detection_lookback_days'));
 
         $reports = FarmImageAnalysis::with(['farmField', 'user'])
             ->whereNotNull('latitude')
             ->whereNotNull('longitude')
+            ->where('outbreak_eligible', true)
+            ->whereIn('verification_state', ['auto_verified', 'expert_verified'])
             ->where('disease_name', $disease)
             ->where('created_at', '>=', $cutoff)
-            ->whereRaw($this->haversineSql('latitude', 'longitude'), [$lat, $lng, $lat, self::RADIUS_KM])
+            ->whereRaw($this->haversineSql('latitude', 'longitude'), [$lat, $lng, $lat, config('privacy.outbreak.radius_km')])
             ->get();
 
         return $reports
@@ -222,7 +235,7 @@ class DiseaseOutbreakService
 
         $nearbyUsers = User::whereNotNull('farm_latitude')
             ->whereNotNull('farm_longitude')
-            ->whereRaw($this->haversineSql('farm_latitude', 'farm_longitude'), [$lat, $lng, $lat, self::RADIUS_KM])
+            ->whereRaw($this->haversineSql('farm_latitude', 'farm_longitude'), [$lat, $lng, $lat, config('privacy.outbreak.radius_km')])
             ->get()
             ->filter(fn (User $user) => $this->userGrowsCrop($user, $crop));
 
@@ -250,14 +263,12 @@ class DiseaseOutbreakService
                 }
             }
 
-            $distance = $this->formatDistance($lat, $lng, (float) $user->farm_latitude, (float) $user->farm_longitude);
-
             if ($level === 'outbreak') {
                 $title = "Outbreak alert: {$disease}";
-                $message = "{$reportCount} farmers within {$distance} reported {$disease} on {$crop}. Act now. Prevention: {$prevention}";
+                $message = "{$reportCount} farmers in your broader area reported {$disease} on {$crop}. Act now. Prevention: {$prevention}";
             } else {
                 $title = "Nearby disease warning: {$disease}";
-                $message = "{$reportCount} farmers within 5km reported {$disease} on {$crop} (about {$distance} from you). Prevention: {$prevention}";
+                $message = "{$reportCount} farmers in your broader area reported {$disease} on {$crop}. Prevention: {$prevention}";
             }
 
             $this->dispatcher->notify(
@@ -270,14 +281,33 @@ class DiseaseOutbreakService
                     'crop' => $crop,
                     'reportCount' => $reportCount,
                     'level' => $level,
-                    'radiusKm' => self::RADIUS_KM,
-                    'centerLat' => $lat,
-                    'centerLng' => $lng,
+                    'radiusKm' => config('privacy.outbreak.radius_km'),
                     'prevention' => $prevention,
                 ],
                 ['push' => true, 'dedupeMinutes' => 60 * 24 * 3, 'dedupeKey' => 'disease'],
             );
         }
+    }
+
+    private function recordAggregate(FarmImageAnalysis $scan, string $crop, int $farmerCount, string $level): void
+    {
+        if ($farmerCount < 3 || ! $scan->effective_disease_label_id) {
+            return;
+        }
+        $grid = max(0.01, (float) config('privacy.outbreak.grid_degrees'));
+        $gridKey = floor(((float) $scan->latitude) / $grid).':'.floor(((float) $scan->longitude) / $grid);
+        DB::table('outbreak_events')->updateOrInsert([
+            'canonical_label_id' => $scan->effective_disease_label_id,
+            'crop_key' => strtolower(trim($crop)),
+            'grid_key' => hash('sha256', $gridKey),
+            'period_start' => now()->startOfWeek()->toDateString(),
+            'level' => $level,
+        ], [
+            'distinct_farmer_count' => $farmerCount,
+            'eligible_scan_count' => $farmerCount,
+            'period_end' => now()->endOfWeek()->toDateString(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
     }
 
     private function resolveScanCrop(FarmImageAnalysis $scan): string

@@ -182,6 +182,7 @@ class MarketPriceService
                         'fetched_at' => now(),
                     ]
                 );
+
                 continue;
             }
 

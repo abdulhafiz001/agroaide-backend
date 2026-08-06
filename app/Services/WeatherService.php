@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class WeatherService
 {
     private const BASE_URL = 'https://api.open-meteo.com/v1/forecast';
+
     private const CACHE_TTL = 3600; // 1 hour
 
     /**
@@ -330,7 +332,7 @@ class WeatherService
             }
 
             try {
-                $at = \Carbon\Carbon::parse($time);
+                $at = Carbon::parse($time);
             } catch (\Throwable) {
                 continue;
             }
@@ -352,18 +354,34 @@ class WeatherService
 
     private function getMoistureTone(?float $moisture): string
     {
-        if ($moisture === null) return 'neutral';
-        if ($moisture < 20) return 'danger';
-        if ($moisture < 40) return 'warning';
-        if ($moisture > 80) return 'warning';
+        if ($moisture === null) {
+            return 'neutral';
+        }
+        if ($moisture < 20) {
+            return 'danger';
+        }
+        if ($moisture < 40) {
+            return 'warning';
+        }
+        if ($moisture > 80) {
+            return 'warning';
+        }
+
         return 'info';
     }
 
     private function getSoilTempTone(?float $temp): string
     {
-        if ($temp === null) return 'neutral';
-        if ($temp < 10 || $temp > 40) return 'danger';
-        if ($temp < 15 || $temp > 35) return 'warning';
+        if ($temp === null) {
+            return 'neutral';
+        }
+        if ($temp < 10 || $temp > 40) {
+            return 'danger';
+        }
+        if ($temp < 15 || $temp > 35) {
+            return 'warning';
+        }
+
         return 'neutral';
     }
 
@@ -417,4 +435,3 @@ class WeatherService
         ];
     }
 }
-

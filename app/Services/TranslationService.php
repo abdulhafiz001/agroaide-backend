@@ -9,8 +9,11 @@ use Illuminate\Support\Facades\Log;
 class TranslationService
 {
     private string $apiKey;
+
     private string $model;
+
     private string $endpoint;
+
     private string $apiVersion;
 
     private const LANGUAGE_NAMES = [
@@ -40,7 +43,7 @@ class TranslationService
         }
 
         $langName = self::languageName($targetLang);
-        $cacheKey = 'translate_' . md5("{$text}_{$targetLang}");
+        $cacheKey = 'translate_'.md5("{$text}_{$targetLang}");
 
         return Cache::remember($cacheKey, 3600, function () use ($text, $langName) {
             return $this->callTranslation($text, $langName);
@@ -67,7 +70,7 @@ class TranslationService
 
             $response = Http::timeout(20)
                 ->withHeaders([
-                    'Authorization' => 'Bearer ' . $this->apiKey,
+                    'Authorization' => 'Bearer '.$this->apiKey,
                     'Accept' => 'application/vnd.github+json',
                     'X-GitHub-Api-Version' => $this->apiVersion,
                     'Content-Type' => 'application/json',
@@ -88,13 +91,16 @@ class TranslationService
             if ($response->successful()) {
                 $content = $response->json('choices.0.message.content') ?? $text;
                 Log::info('GitHub Models: translation complete', ['target_lang' => $langName]);
+
                 return trim($content);
             }
 
             Log::warning('GitHub Models translation failed', ['status' => $response->status(), 'body' => $response->body()]);
+
             return $text;
         } catch (\Exception $e) {
             Log::warning('Translation failed', ['error' => $e->getMessage()]);
+
             return $text;
         }
     }

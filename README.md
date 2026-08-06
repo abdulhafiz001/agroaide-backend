@@ -17,6 +17,7 @@ php artisan key:generate
 # configure DB_* and API keys in .env
 composer install
 php artisan migrate
+php artisan db:seed --class=DiagnosisDomainSeeder
 php artisan serve --host=0.0.0.0 --port=8000
 ```
 
@@ -24,6 +25,7 @@ For scheduled alerts (weather, tasks, outbreaks):
 
 ```bash
 php artisan schedule:work
+php artisan queue:work database --queue=diagnosis,evaluation,default --tries=3 --timeout=3700
 ```
 
 ## Environment setup (secrets)
@@ -43,7 +45,7 @@ Copy `.env.example` → `.env`. **Never commit** `.env` or service-account JSON.
 | `MARKETEYE_BASE_URL` | Default `https://marketeye.ahzcode.sbs/api/v1/public` |
 | `MAIL_*` | Welcome / password-reset email |
 
-See also: [`docs/FIREBASE_FCM_SETUP.md`](../docs/FIREBASE_FCM_SETUP.md), [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+Diagnosis hardening documentation: [`docs/architecture.md`](docs/architecture.md), [`docs/evaluation.md`](docs/evaluation.md), and [`docs/dataset-protocol.md`](docs/dataset-protocol.md).
 
 ## Tests
 
@@ -53,6 +55,20 @@ php artisan test
 
 Focused suites: outbreak distance, auth API, scan history ownership.
 
+## Security and privacy foundation
+
+- API tokens expire after 30 days and password changes revoke every token.
+- Native clients use bearer tokens. Cross-origin browser API access is denied by default; the future staff dashboard must remain same-origin.
+- Scan images and voice clips are strictly decoded, checked by magic bytes/MIME and size limits, and temporary provider files are always removed.
+- Outbreak heatmaps expose only 0.05-degree grid cells with at least three distinct farmers. Precise report coordinates remain internal and are never included in outbreak notifications.
+- Only canonical diseased scans that are auto-verified or expert-verified can alter field health or contribute to outbreak aggregates. Legacy and disputed scans remain ineligible.
+- Terms and privacy metadata is available at `GET /api/legal`; public pages are `/legal/terms` and `/legal/privacy`.
+- Registration requires `termsVersion` and `privacyVersion`. `researchConsent` is a separate optional boolean. Existing users receive HTTP 428 with `consentRequired: true` until `POST /api/auth/consent` records current versions.
+- Personal-data controls: `GET /api/privacy/export`, combined `DELETE /api/privacy/histories`, individual `DELETE /api/farm/scan-history/{id}`, `DELETE /api/advisor/history`, and password-confirmed `DELETE /api/auth/account`.
+- Retention is versioned in `config/security.php`: exports/temp media/OTPs, sync action logs, advisor conversations, and notifications are purged by `agroaide:purge-expired-personal-data`.
+
+AI preferences are persisted through `PUT /api/auth/profile` as `aiResponseDepth` (`concise|balanced|deep`), `aiRiskTolerance` (`cautious|balanced|bold`), and `voiceTips` (boolean).
+
 ## Useful artisan commands
 
 ```bash
@@ -60,8 +76,19 @@ php artisan agroaide:detect-outbreaks
 php artisan agroaide:send-weather-alerts
 php artisan agroaide:send-task-reminders
 php artisan agroaide:test-outbreak-notification --email=you@example.com
+php artisan agroaide:purge-expired-personal-data
+php artisan agroaide:staff-account
+php artisan agroaide:evaluation:import --help
+php artisan agroaide:evaluation:run --help
+php artisan agroaide:health-snapshot
 ```
+
+The staff dashboard is served same-origin at `/staff/login` using the local Vite/Tailwind build. Agronomists review scans and read aggregate evaluation metrics; administrator-only pages manage run queueing, confidence-policy activation, staff roles, and audit details. Staff credentials are created interactively; no credentials are seeded or sourced from environment variables. In production, Supervisor runs the database-backed diagnosis/evaluation worker and Laravel scheduler.
+
+`POST /api/farm/scans/{scan}/feedback` is throttled and idempotent per farmer/scan: repeated taps update the current feedback record instead of creating duplicate metric events.
 
 ## API health
 
 `GET /api/health` → `{ "ok": true }`
+
+The backend CI workflow runs the complete test suite, Pint, Composer's advisory audit, and the staff dashboard production build on every push and pull request.

@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 class DetectOutbreaks extends Command
 {
     protected $signature = 'agroaide:detect-outbreaks';
+
     protected $description = 'Scan recent disease reports and trigger outbreak alerts';
 
     public function handle(DiseaseOutbreakService $service): int

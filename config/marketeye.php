@@ -2,6 +2,7 @@
 
 /**
  * Market Eye integration — crowd-verified Nigerian market prices.
+ *
  * @see https://marketeye.ahzcode.sbs/developers
  */
 return [

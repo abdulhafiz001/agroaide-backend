@@ -1,14 +1,16 @@
 <?php
 
-use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdvisorController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalendarController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\EconomicsController;
 use App\Http\Controllers\Api\FarmController;
+use App\Http\Controllers\Api\LegalController;
 use App\Http\Controllers\Api\MarketController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\OutbreakController;
+use App\Http\Controllers\Api\PrivacyController;
 use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\WeatherController;
 use Illuminate\Support\Facades\Route;
@@ -21,57 +23,25 @@ Route::get('/farm/exports/{userId}/{file}', [EconomicsController::class, 'downlo
     ->name('economics.export.download')
     ->where(['userId' => '[0-9]+', 'file' => 'field-[A-Za-z0-9._-]+\.pdf']);
 
-// Debug: test GitHub Models (dev only, no auth)
-Route::get('/debug/github-models-test', function () {
-    if (! app()->environment('local')) {
-        return response()->json(['error' => 'Not available'], 404);
-    }
-    $key = config('services.github_models.api_key', '');
-    $model = config('services.github_models.model', 'openai/gpt-4o-mini');
-    $endpoint = config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions');
-    $apiVersion = config('services.github_models.api_version', '2022-11-28');
-    if (empty($key)) {
-        return response()->json(['ok' => false, 'error' => 'GITHUB_MODELS_API_KEY not set in .env']);
-    }
-    try {
-        $r = \Illuminate\Support\Facades\Http::timeout(30)
-            ->withHeaders([
-                'Authorization' => 'Bearer ' . $key,
-                'Accept' => 'application/vnd.github+json',
-                'X-GitHub-Api-Version' => $apiVersion,
-                'Content-Type' => 'application/json',
-            ])
-            ->post($endpoint, [
-                'model' => $model,
-                'messages' => [['role' => 'user', 'content' => 'Say "OK" if you can read this.']],
-                'max_tokens' => 20,
-            ]);
-        $status = $r->status();
-        $body = $r->json();
-        if ($r->successful()) {
-            return response()->json(['ok' => true, 'reply' => $body['choices'][0]['message']['content'] ?? '?']);
-        }
-        return response()->json(['ok' => false, 'status' => $status, 'error' => $body['error'] ?? $r->body()]);
-    } catch (\Exception $e) {
-        return response()->json(['ok' => false, 'error' => $e->getMessage()]);
-    }
-});
+Route::get('/legal', [LegalController::class, 'metadata']);
 
 Route::prefix('auth')->group(function (): void {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login', [AuthController::class, 'login']);
-    Route::post('/recovery', [AuthController::class, 'requestPasswordReset']);
-    Route::post('/recovery/reset', [AuthController::class, 'resetPasswordWithCode']);
+    Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:register');
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+    Route::post('/recovery', [AuthController::class, 'requestPasswordReset'])->middleware('throttle:recovery');
+    Route::post('/recovery/reset', [AuthController::class, 'resetPasswordWithCode'])->middleware('throttle:recovery');
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/me', [AuthController::class, 'me']);
-        Route::put('/profile', [AuthController::class, 'updateProfile']);
-        Route::post('/change-password', [AuthController::class, 'changePassword']);
+        Route::put('/profile', [AuthController::class, 'updateProfile'])->middleware('consent.current');
+        Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('consent.current');
         Route::post('/logout', [AuthController::class, 'logout']);
+        Route::post('/consent', [LegalController::class, 'consent']);
+        Route::delete('/account', [PrivacyController::class, 'deleteAccount']);
     });
 });
 
-Route::middleware('auth:sanctum')->group(function (): void {
+Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void {
     Route::get('/farm/overview', [FarmController::class, 'overview']);
     Route::get('/farm/fields/{fieldId}', [FarmController::class, 'showField']);
     Route::post('/farm/fields', [FarmController::class, 'addField']);
@@ -84,10 +54,14 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::put('/farm/journal/{entryId}', [FarmController::class, 'updateJournalEntry']);
     Route::delete('/farm/journal/{entryId}', [FarmController::class, 'deleteJournalEntry']);
     Route::get('/map/fields', [FarmController::class, 'mapFields']);
-    Route::post('/farm/analyze-image', [FarmController::class, 'analyzeImage']);
+    Route::post('/farm/analyze-image', [FarmController::class, 'analyzeImage'])->middleware('throttle:scan');
+    Route::post('/farm/scans', [FarmController::class, 'analyzeImage'])->middleware('throttle:scan');
     Route::get('/farm/scan-history', [FarmController::class, 'scanHistory']);
     Route::get('/farm/scan-history/{scanId}/image', [FarmController::class, 'scanImage']);
     Route::get('/farm/scan-history/{scanId}', [FarmController::class, 'scanDetail']);
+    Route::delete('/farm/scan-history/{scanId}', [PrivacyController::class, 'deleteScan']);
+    Route::get('/farm/scans/{scanId}', [FarmController::class, 'scanDetail']);
+    Route::post('/farm/scans/{scanId}/feedback', [FarmController::class, 'scanFeedback'])->middleware('throttle:feedback');
 
     Route::get('/farm/fields/{fieldId}/transactions', [EconomicsController::class, 'listTransactions']);
     Route::post('/farm/fields/{fieldId}/transactions', [EconomicsController::class, 'createTransaction']);
@@ -108,15 +82,16 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::delete('/calendar/crop-watches/{id}', [CalendarController::class, 'destroyCropWatch']);
     Route::post('/calendar/planting-reminders', [CalendarController::class, 'setPlantingReminder']);
 
-    Route::post('/sync/delta', [SyncController::class, 'delta']);
-    Route::get('/sync/pull', [SyncController::class, 'pull']);
+    Route::post('/sync/delta', [SyncController::class, 'delta'])->middleware('throttle:sync');
+    Route::get('/sync/pull', [SyncController::class, 'pull'])->middleware('throttle:sync');
 
     Route::get('/weather/forecast', [WeatherController::class, 'forecast']);
-    Route::post('/advisor/chat', [AdvisorController::class, 'chat']);
+    Route::post('/advisor/chat', [AdvisorController::class, 'chat'])->middleware('throttle:chat');
     Route::get('/advisor/history', [AdvisorController::class, 'history']);
     Route::get('/advisor/suggestions', [AdvisorController::class, 'suggestions']);
     Route::get('/advisor/daily-insight', [AdvisorController::class, 'dailyInsight']);
-    Route::post('/advisor/transcribe', [AdvisorController::class, 'transcribeVoice']);
+    Route::post('/advisor/transcribe', [AdvisorController::class, 'transcribeVoice'])->middleware('throttle:transcription');
+    Route::delete('/advisor/history', [PrivacyController::class, 'clearAdvisorHistory']);
     Route::get('/dashboard/snapshot', [DashboardController::class, 'snapshot']);
     Route::get('/dashboard/ai-insights', [DashboardController::class, 'aiInsights']);
     Route::get('/market/intel', [MarketController::class, 'intel']);
@@ -126,4 +101,6 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('/outbreak/heatmap', [OutbreakController::class, 'heatmap']);
     Route::get('/outbreak/alerts', [OutbreakController::class, 'alerts']);
+    Route::get('/privacy/export', [PrivacyController::class, 'export'])->middleware('throttle:export');
+    Route::delete('/privacy/histories', [PrivacyController::class, 'clearHistories'])->middleware('throttle:privacy-write');
 });

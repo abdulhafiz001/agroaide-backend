@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
 use App\Models\CropWatch;
 use App\Models\PlantingReminder;
+use App\Models\User;
 use App\Services\SeasonalCalendarService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,7 @@ class CalendarController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $selectedDate = $request->query('date', now()->toDateString());
@@ -194,12 +195,24 @@ class CalendarController extends Controller
         ]);
 
         $updateData = [];
-        if (isset($validated['title'])) $updateData['title'] = $validated['title'];
-        if (isset($validated['description'])) $updateData['description'] = $validated['description'];
-        if (isset($validated['scheduledDate'])) $updateData['scheduled_date'] = $validated['scheduledDate'];
-        if (isset($validated['period'])) $updateData['period'] = $validated['period'];
-        if (isset($validated['durationMinutes'])) $updateData['duration_minutes'] = $validated['durationMinutes'];
-        if (isset($validated['impact'])) $updateData['impact'] = $validated['impact'];
+        if (isset($validated['title'])) {
+            $updateData['title'] = $validated['title'];
+        }
+        if (isset($validated['description'])) {
+            $updateData['description'] = $validated['description'];
+        }
+        if (isset($validated['scheduledDate'])) {
+            $updateData['scheduled_date'] = $validated['scheduledDate'];
+        }
+        if (isset($validated['period'])) {
+            $updateData['period'] = $validated['period'];
+        }
+        if (isset($validated['durationMinutes'])) {
+            $updateData['duration_minutes'] = $validated['durationMinutes'];
+        }
+        if (isset($validated['impact'])) {
+            $updateData['impact'] = $validated['impact'];
+        }
 
         $task->update($updateData);
 
@@ -237,7 +250,7 @@ class CalendarController extends Controller
 
     public function seasonalSuggestions(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $crop = $request->query('crop');

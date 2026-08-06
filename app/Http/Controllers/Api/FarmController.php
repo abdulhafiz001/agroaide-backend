@@ -4,14 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\FarmField;
+use App\Models\FarmImageAnalysis;
 use App\Models\FieldTransaction;
 use App\Models\JournalEntry;
+use App\Models\ScanFeedback;
+use App\Models\User;
 use App\Services\FarmImageAnalysisService;
 use App\Services\GeoAreaService;
 use App\Services\InputEstimateService;
+use App\Services\ScanVerificationService;
+use App\Support\MediaPayloadValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class FarmController extends Controller
 {
@@ -19,11 +25,13 @@ class FarmController extends Controller
         private FarmImageAnalysisService $imageAnalysisService,
         private GeoAreaService $geoAreaService,
         private InputEstimateService $inputEstimateService,
+        private MediaPayloadValidator $mediaValidator,
+        private ScanVerificationService $scanVerification,
     ) {}
 
     public function overview(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         $economicsByField = FieldTransaction::where('user_id', $user->id)
@@ -188,13 +196,27 @@ class FarmController extends Controller
         ]);
 
         $updateData = [];
-        if (isset($validated['name'])) $updateData['name'] = $validated['name'];
-        if (isset($validated['crop'])) $updateData['crop'] = $validated['crop'];
-        if (isset($validated['areaM2'])) $updateData['area_m2'] = $validated['areaM2'];
-        if (isset($validated['status'])) $updateData['status'] = $validated['status'];
-        if (isset($validated['healthPercentage'])) $updateData['health_percentage'] = $validated['healthPercentage'];
-        if (isset($validated['moisturePercentage'])) $updateData['moisture_percentage'] = $validated['moisturePercentage'];
-        if (isset($validated['plantedAt'])) $updateData['planted_at'] = $validated['plantedAt'];
+        if (isset($validated['name'])) {
+            $updateData['name'] = $validated['name'];
+        }
+        if (isset($validated['crop'])) {
+            $updateData['crop'] = $validated['crop'];
+        }
+        if (isset($validated['areaM2'])) {
+            $updateData['area_m2'] = $validated['areaM2'];
+        }
+        if (isset($validated['status'])) {
+            $updateData['status'] = $validated['status'];
+        }
+        if (isset($validated['healthPercentage'])) {
+            $updateData['health_percentage'] = $validated['healthPercentage'];
+        }
+        if (isset($validated['moisturePercentage'])) {
+            $updateData['moisture_percentage'] = $validated['moisturePercentage'];
+        }
+        if (isset($validated['plantedAt'])) {
+            $updateData['planted_at'] = $validated['plantedAt'];
+        }
 
         $field->update($updateData);
 
@@ -222,7 +244,7 @@ class FarmController extends Controller
             ->where('id', $fieldId)
             ->firstOrFail();
 
-        $eco = \App\Models\FieldTransaction::where('user_id', $request->user()->id)
+        $eco = FieldTransaction::where('user_id', $request->user()->id)
             ->where('farm_field_id', $field->id)
             ->selectRaw("
                 COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount ELSE 0 END), 0) as total_expense,
@@ -415,7 +437,7 @@ class FarmController extends Controller
         $validated = $request->validate([
             'note' => ['required', 'string', 'max:1000'],
             'type' => ['nullable', 'string', 'max:50'],
-            'farmFieldId' => ['nullable', 'integer', 'exists:farm_fields,id'],
+            'farmFieldId' => ['nullable', 'integer', Rule::exists('farm_fields', 'id')->where('user_id', $request->user()->id)],
             'clientUuid' => ['nullable', 'uuid'],
         ]);
 
@@ -467,13 +489,33 @@ class FarmController extends Controller
         $validated = $request->validate([
             'note' => ['nullable', 'string', 'max:1000'],
             'type' => ['nullable', 'string', 'max:50'],
+            'farmFieldId' => ['nullable', 'integer', Rule::exists('farm_fields', 'id')->where('user_id', $request->user()->id)],
         ]);
 
-        if (isset($validated['note'])) $entry->note = $validated['note'];
-        if (isset($validated['type'])) $entry->type = $validated['type'];
+        if (isset($validated['note'])) {
+            $entry->note = $validated['note'];
+        }
+        if (isset($validated['type'])) {
+            $entry->type = $validated['type'];
+        }
+        if (array_key_exists('farmFieldId', $validated)) {
+            $entry->farm_field_id = $validated['farmFieldId'];
+        }
         $entry->save();
+        $entry->load('farmField:id,name');
 
-        return response()->json(['message' => 'Journal entry updated.']);
+        return response()->json([
+            'message' => 'Journal entry updated.',
+            'entry' => [
+                'id' => (string) $entry->id,
+                'date' => $entry->created_at->toIso8601String(),
+                'note' => $entry->note,
+                'type' => $entry->type,
+                'farmFieldId' => $entry->farm_field_id ? (string) $entry->farm_field_id : null,
+                'fieldName' => $entry->farmField?->name,
+                'clientUuid' => $entry->client_uuid,
+            ],
+        ]);
     }
 
     public function deleteJournalEntry(Request $request, int $entryId): JsonResponse
@@ -490,36 +532,29 @@ class FarmController extends Controller
     {
         $validated = $request->validate([
             'imageBase64' => ['required', 'string'],
-            'farmFieldId' => ['nullable', 'integer', 'exists:farm_fields,id'],
+            'farmFieldId' => ['nullable', 'integer', Rule::exists('farm_fields', 'id')->where('user_id', $request->user()->id)],
         ]);
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
-        if (isset($validated['farmFieldId'])) {
-            $ownsField = FarmField::where('id', $validated['farmFieldId'])
-                ->where('user_id', $user->id)
-                ->exists();
-            if (! $ownsField) {
-                return response()->json(['message' => 'Field not found.'], 404);
-            }
-        }
+        $media = $this->mediaValidator->image($validated['imageBase64']);
 
         $result = $this->imageAnalysisService->analyze(
             $user,
-            $validated['imageBase64'],
+            $media['dataUrl'],
             $validated['farmFieldId'] ?? null,
         );
 
         return response()->json([
-            'scanId' => $result['scanId'] ?? null,
-            'analysis' => $result['analysis'] ?? $result,
-        ]);
+            'scanId' => $result['scanId'],
+            'scan' => $result['scan'],
+        ], 202);
     }
 
     public function scanHistory(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
 
         return response()->json([
@@ -529,7 +564,7 @@ class FarmController extends Controller
 
     public function scanDetail(Request $request, string $scanId): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $scan = $this->imageAnalysisService->getScanForUser($user, $scanId);
 
@@ -542,7 +577,7 @@ class FarmController extends Controller
 
     public function scanImage(Request $request, string $scanId)
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user();
         $response = $this->imageAnalysisService->getImageResponseForUser($user, $scanId);
 
@@ -551,5 +586,43 @@ class FarmController extends Controller
         }
 
         return $response;
+    }
+
+    public function scanFeedback(Request $request, string $scanId): JsonResponse
+    {
+        $validated = $request->validate([
+            'verdict' => ['required', Rule::in(['correct', 'incorrect', 'unsure'])],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $scan = FarmImageAnalysis::where('user_id', $request->user()->id)->findOrFail($scanId);
+        $feedback = ScanFeedback::updateOrCreate(
+            [
+                'farm_image_analysis_id' => $scan->id,
+                'user_id' => $request->user()->id,
+            ],
+            [
+                'verdict' => $validated['verdict'],
+                'comment' => $validated['comment'] ?? null,
+            ],
+        );
+        if (in_array($validated['verdict'], ['incorrect', 'unsure'], true)
+            && $scan->verification_state !== 'disputed'
+            && $this->scanVerification->canTransition($scan->verification_state, 'disputed')) {
+            $scan = $this->scanVerification->transition(
+                $scan,
+                'disputed',
+                $request->user(),
+                reason: 'farmer_'.$validated['verdict'],
+            );
+        }
+
+        return response()->json([
+            'feedbackId' => (string) $feedback->id,
+            'scan' => [
+                'id' => (string) $scan->id,
+                'verificationState' => $scan->verification_state,
+                'outbreakEligible' => (bool) $scan->outbreak_eligible,
+            ],
+        ], $feedback->wasRecentlyCreated ? 201 : 200);
     }
 }
