@@ -27,9 +27,21 @@ return Application::configure(basePath: dirname(__DIR__))
                 return ['.*'];
             }
 
-            $host = parse_url((string) config('app.url'), PHP_URL_HOST) ?: 'localhost';
+            // Always allow container healthchecks (Dockerfile curls 127.0.0.1).
+            $hosts = ['^localhost$', '^127\.0\.0\.1$'];
 
-            return ['^'.preg_quote($host, '/').'$'];
+            $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+            if (is_string($appHost) && $appHost !== '') {
+                $hosts[] = '^'.preg_quote($appHost, '/').'$';
+            }
+
+            foreach (config('security.trusted_hosts', []) as $extra) {
+                if (is_string($extra) && $extra !== '') {
+                    $hosts[] = '^'.preg_quote($extra, '/').'$';
+                }
+            }
+
+            return array_values(array_unique($hosts));
         });
         $middleware->append(LimitRequestBody::class);
         $middleware->append(SecurityHeaders::class);

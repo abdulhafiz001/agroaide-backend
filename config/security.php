@@ -1,6 +1,11 @@
 <?php
 
 return [
+    // Extra hosts beyond APP_URL / localhost (comma-separated in env).
+    'trusted_hosts' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('TRUSTED_HOSTS', '')),
+    ))),
     'token_expiration_minutes' => 60 * 24 * 30,
     'max_request_bytes' => 12 * 1024 * 1024,
     'media' => [
