@@ -3,11 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Models\CropWatch;
+use App\Services\LlmChatClient;
 use App\Services\NotificationDispatcher;
 use App\Services\SeasonalCalendarService;
 use App\Services\TranslationService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AnalyzeCropWatches extends Command
@@ -19,6 +19,7 @@ class AnalyzeCropWatches extends Command
     public function __construct(
         private SeasonalCalendarService $seasonalCalendar,
         private NotificationDispatcher $dispatcher,
+        private LlmChatClient $llm,
     ) {
         parent::__construct();
     }
@@ -209,30 +210,18 @@ class AnalyzeCropWatches extends Command
             return false;
         }
 
-        $apiKey = trim(config('services.groq.api_key', ''));
-        if ($apiKey === '') {
-            return false;
-        }
-
         try {
-            $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
-            $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
-            $response = Http::timeout(12)
-                ->withToken($apiKey)
-                ->acceptJson()
-                ->post($endpoint, [
-                    'model' => $model,
-                    'messages' => [
-                        [
-                            'role' => 'system',
-                            'content' => 'Answer YES or NO only. Is this a real agricultural crop plant people farm in Nigeria?',
-                        ],
-                        ['role' => 'user', 'content' => $trimmed],
-                    ],
-                    'max_tokens' => 5,
-                    'temperature' => 0,
-                ]);
-            $content = strtoupper(trim((string) ($response->json('choices.0.message.content') ?? '')));
+            $content = strtoupper($this->llm->chat([
+                [
+                    'role' => 'system',
+                    'content' => 'Answer YES or NO only. Is this a real agricultural crop plant people farm in Nigeria?',
+                ],
+                ['role' => 'user', 'content' => $trimmed],
+            ], [
+                'timeout' => 12,
+                'max_tokens' => 5,
+                'temperature' => 0,
+            ]));
 
             return str_starts_with($content, 'YES');
         } catch (\Throwable $e) {
@@ -254,31 +243,19 @@ class AnalyzeCropWatches extends Command
                 : "It is a good window to plant {$crop} around {$placeLabel}.",
         };
 
-        $apiKey = trim(config('services.groq.api_key', ''));
-        if ($apiKey === '') {
-            return $fallback;
-        }
-
         $prompt = "Write 2 short sentences for a Nigerian farmer in {$langName}. Kind={$kind}. Crop={$crop}. "
             ."Farmer location (be specific, use this place name): {$placeLabel}. BestDate={$bestDate}. "
             .'Mention the place name so they know the app knows where they farm. Do not invent other crops.';
 
         try {
-            $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
-            $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
-            $response = Http::timeout(12)
-                ->withToken($apiKey)
-                ->acceptJson()
-                ->post($endpoint, [
-                    'model' => $model,
-                    'messages' => [
-                        ['role' => 'system', 'content' => 'Short farming notifications only.'],
-                        ['role' => 'user', 'content' => $prompt],
-                    ],
-                    'max_tokens' => 120,
-                    'temperature' => 0.4,
-                ]);
-            $content = trim((string) ($response->json('choices.0.message.content') ?? ''));
+            $content = $this->llm->chat([
+                ['role' => 'system', 'content' => 'Short farming notifications only.'],
+                ['role' => 'user', 'content' => $prompt],
+            ], [
+                'timeout' => 12,
+                'max_tokens' => 120,
+                'temperature' => 0.4,
+            ]);
 
             return $content !== '' ? $content : $fallback;
         } catch (\Throwable $e) {

@@ -1,7 +1,10 @@
 <?php
 
 return [
-    // Extra hosts beyond APP_URL / localhost (comma-separated in env).
+    // Coolify reverse proxies overwrite Host. Strict allowlisting breaks mobile
+    // login whenever APP_URL does not exactly match the public hostname.
+    // Set ENFORCE_TRUSTED_HOSTS=true and TRUSTED_HOSTS=your.domain.com to lock down.
+    'enforce_trusted_hosts' => (bool) env('ENFORCE_TRUSTED_HOSTS', false),
     'trusted_hosts' => array_values(array_filter(array_map(
         'trim',
         explode(',', (string) env('TRUSTED_HOSTS', '')),

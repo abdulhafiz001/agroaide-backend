@@ -5,13 +5,15 @@ namespace App\Services;
 use App\Models\ConfidencePolicy;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class CropDiagnosisService
 {
-    public function __construct(private CanonicalLabelResolver $labels) {}
+    public function __construct(
+        private CanonicalLabelResolver $labels,
+        private LlmChatClient $llm,
+    ) {}
 
     public function diagnose(string $imageDataUrl, array $context = [], array $versions = []): array
     {
@@ -24,38 +26,29 @@ class CropDiagnosisService
         $policy = isset($versions['confidence_policy_id'])
             ? ConfidencePolicy::findOrFail($versions['confidence_policy_id'])
             : ConfidencePolicy::where('active', true)->latest('id')->firstOrFail();
-        $started = hrtime(true);
-        Log::info('Groq crop diagnosis request started', ['model' => $model->model_identifier]);
-        $response = Http::timeout(90)
-            ->withToken((string) config('services.groq.api_key'))
-            ->acceptJson()
-            ->post(config('services.groq.chat_endpoint'), [
-                'model' => $model->model_identifier,
-                'messages' => [
-                    ['role' => 'system', 'content' => $prompt->system_prompt],
-                    ['role' => 'user', 'content' => [
-                        ['type' => 'text', 'text' => $prompt->user_prompt."\nContext: ".json_encode($context)],
-                        ['type' => 'image_url', 'image_url' => ['url' => $imageDataUrl]],
-                    ]],
-                ],
-                'response_format' => ['type' => 'json_object'],
-                ...$model->parameters,
-            ]);
-        $latency = (int) round((hrtime(true) - $started) / 1_000_000);
-        if (! $response->successful()) {
-            Log::error('Groq crop diagnosis request failed', [
-                'model' => $model->model_identifier,
-                'status' => $response->status(),
-                'error' => data_get($response->json(), 'error.message', 'unknown provider error'),
-            ]);
-            throw new RuntimeException('diagnosis_provider_error');
-        }
-        Log::info('Groq crop diagnosis response received', [
-            'model' => $model->model_identifier,
-            'latency_ms' => $latency,
-        ]);
 
-        $raw = (string) data_get($response->json(), 'choices.0.message.content', '');
+        $started = hrtime(true);
+        $messages = [
+            ['role' => 'system', 'content' => $prompt->system_prompt],
+            ['role' => 'user', 'content' => [
+                ['type' => 'text', 'text' => $prompt->user_prompt."\nContext: ".json_encode($context)],
+                ['type' => 'image_url', 'image_url' => ['url' => $imageDataUrl]],
+            ]],
+        ];
+
+        try {
+            $raw = $this->llm->chat($messages, array_merge([
+                'timeout' => 90,
+                'temperature' => 0.0,
+                'max_tokens' => 2048,
+                // Some NVIDIA models reject response_format; client still gets JSON via prompt.
+            ], is_array($model->parameters) ? $model->parameters : []));
+        } catch (\Throwable $e) {
+            Log::error('Crop diagnosis provider failed', ['error' => $e->getMessage()]);
+            throw new RuntimeException('diagnosis_provider_error', 0, $e);
+        }
+
+        $latency = (int) round((hrtime(true) - $started) / 1_000_000);
         $clean = trim(preg_replace('/^```(?:json)?|```$/m', '', $raw) ?? $raw);
         $parsed = json_decode($clean, true);
         if (! is_array($parsed)) {

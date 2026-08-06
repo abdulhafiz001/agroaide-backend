@@ -4,11 +4,12 @@ namespace App\Services;
 
 use App\Models\FarmField;
 use App\Models\User;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class InputEstimateService
 {
+    public function __construct(private LlmChatClient $llm) {}
+
     /**
      * @return array<string, mixed>
      */
@@ -111,41 +112,27 @@ class InputEstimateService
         $langName = TranslationService::languageName($lang);
         $fallback = $this->buildFallbackSummary($user, $numbers);
 
-        $apiKey = trim(config('services.groq.api_key', ''));
-        if ($apiKey === '') {
-            return $fallback;
-        }
-
         $prompt = 'Rewrite these farm input numbers into 3-5 short friendly sentences for a Nigerian farmer. '
             ."Use ONLY these numbers — do not invent different amounts. Language: {$langName}. "
             ."Include the disclaimer that it is a guide and may not be 100% correct.\n\n"
             .json_encode($numbers, JSON_PRETTY_PRINT);
 
-        $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
-        $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
-
-        $response = Http::timeout(3)
-            ->connectTimeout(2)
-            ->withToken($apiKey)
-            ->acceptJson()
-            ->post($endpoint, [
-                'model' => $model,
-                'messages' => [
-                    ['role' => 'system', 'content' => 'You write short agronomy summaries. Never change numeric quantities.'],
-                    ['role' => 'user', 'content' => $prompt],
-                ],
+        try {
+            $content = $this->llm->chat([
+                ['role' => 'system', 'content' => 'You write short agronomy summaries. Never change numeric quantities.'],
+                ['role' => 'user', 'content' => $prompt],
+            ], [
+                'timeout' => 8,
                 'max_tokens' => 280,
                 'temperature' => 0.3,
             ]);
 
-        if ($response->successful()) {
-            $content = trim((string) ($response->json('choices.0.message.content') ?? ''));
-            if ($content !== '') {
-                return $content;
-            }
-        }
+            return $content !== '' ? $content : $fallback;
+        } catch (\Throwable $e) {
+            Log::debug('Input estimate AI summary skipped', ['error' => $e->getMessage()]);
 
-        return $fallback;
+            return $fallback;
+        }
     }
 
     private function normalizeCrop(string $crop): string

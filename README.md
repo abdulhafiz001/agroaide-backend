@@ -7,7 +7,7 @@ Backend for the AgroAide mobile farm assistant: auth, farm records, weather, AI 
 - PHP 8.2+ / Laravel 12
 - Laravel Sanctum (API tokens)
 - MySQL (or SQLite for local/testing)
-- Open-Meteo, Groq vision/text/Whisper, optional PlantNet, Firebase FCM
+- Open-Meteo, NVIDIA NIM (primary AI) + Groq backup/Whisper, optional PlantNet, Firebase FCM
 
 ## Quick start
 
@@ -36,7 +36,8 @@ Copy `.env.example` → `.env`. **Never commit** `.env` or service-account JSON.
 |----------|---------|
 | `APP_KEY` | Laravel encryption key |
 | `DB_*` | Database |
-| `GROQ_API_KEY` | Crop vision and voice transcription ([console.groq.com](https://console.groq.com/keys)) |
+| `NVIDIA_API_KEY` | Primary AI text + vision ([build.nvidia.com](https://build.nvidia.com)) |
+| `GROQ_API_KEY` | Backup AI + voice transcription ([console.groq.com](https://console.groq.com/keys)) |
 | `PLANTNET_API_KEY` | Optional plant ID assist |
 | `FCM_PROJECT_ID` | Firebase project id |
 | `FCM_CREDENTIALS_PATH` | Path to Firebase service account JSON (gitignored) |

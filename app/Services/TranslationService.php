@@ -3,17 +3,10 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class TranslationService
 {
-    private string $apiKey;
-
-    private string $model;
-
-    private string $endpoint;
-
     private const LANGUAGE_NAMES = [
         'en' => 'English',
         'ha' => 'Hausa',
@@ -21,12 +14,7 @@ class TranslationService
         'pcm' => 'Nigerian Pidgin',
     ];
 
-    public function __construct()
-    {
-        $this->apiKey = trim(config('services.groq.api_key', ''));
-        $this->model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
-        $this->endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
-    }
+    public function __construct(private LlmChatClient $llm) {}
 
     public static function languageName(string $code): string
     {
@@ -58,40 +46,19 @@ class TranslationService
 
     private function callTranslation(string $text, string $langName): string
     {
-        if (empty($this->apiKey)) {
-            return $text;
-        }
-
         try {
-            Log::info('Groq: translating text', ['target_lang' => $langName, 'model' => $this->model]);
-
-            $response = Http::timeout(20)
-                ->withToken($this->apiKey)
-                ->acceptJson()
-                ->post($this->endpoint, [
-                    'model' => $this->model,
-                    'messages' => [
-                        [
-                            'role' => 'system',
-                            'content' => "You are a translator for Nigerian farmers. Translate the following text into {$langName}. Keep it natural, simple, and farmer-friendly. Return ONLY the translated text, nothing else. Do not add quotes or explanations.",
-                        ],
-                        ['role' => 'user', 'content' => $text],
-                    ],
-                    'max_tokens' => 512,
-                    'temperature' => 0.3,
-                ]);
-
-            if ($response->successful()) {
-                $content = $response->json('choices.0.message.content') ?? $text;
-                Log::info('Groq: translation complete', ['target_lang' => $langName]);
-
-                return trim($content);
-            }
-
-            Log::warning('Groq translation failed', ['status' => $response->status(), 'body' => $response->body()]);
-
-            return $text;
-        } catch (\Exception $e) {
+            return $this->llm->chat([
+                [
+                    'role' => 'system',
+                    'content' => "You are a translator for Nigerian farmers. Translate the following text into {$langName}. Keep it natural, simple, and farmer-friendly. Return ONLY the translated text, nothing else. Do not add quotes or explanations.",
+                ],
+                ['role' => 'user', 'content' => $text],
+            ], [
+                'timeout' => 20,
+                'max_tokens' => 512,
+                'temperature' => 0.3,
+            ]);
+        } catch (\Throwable $e) {
             Log::warning('Translation failed', ['error' => $e->getMessage()]);
 
             return $text;

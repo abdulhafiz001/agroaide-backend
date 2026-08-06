@@ -2,9 +2,9 @@
 
 return [
     'model' => [
-        'provider' => 'groq',
-        'identifier' => 'qwen/qwen3.6-27b',
-        'version' => '2026-08-06-groq',
+        'provider' => 'nvidia',
+        'identifier' => 'meta/llama-3.2-11b-vision-instruct',
+        'version' => '2026-08-06-nvidia',
         'parameters' => ['temperature' => 0.0, 'max_tokens' => 2048],
     ],
     'prompt' => [

@@ -22,22 +22,22 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
         $middleware->trustHosts(at: function (): array {
-            if (app()->environment('local')) {
-                // Physical devices reach the local API through the computer's LAN IP.
+            // Local + Coolify default: allow any Host. The reverse proxy owns Host
+            // rewriting; a strict allowlist was returning HTTP 400 on mobile login.
+            if (app()->environment('local') || ! config('security.enforce_trusted_hosts')) {
                 return ['.*'];
             }
 
-            // Always allow container healthchecks (Dockerfile curls 127.0.0.1).
             $hosts = ['^localhost$', '^127\.0\.0\.1$'];
 
             $appHost = parse_url((string) config('app.url'), PHP_URL_HOST);
             if (is_string($appHost) && $appHost !== '') {
-                $hosts[] = '^'.preg_quote($appHost, '/').'$';
+                $hosts[] = '^(.+\.)?'.preg_quote($appHost, '/').'$';
             }
 
             foreach (config('security.trusted_hosts', []) as $extra) {
                 if (is_string($extra) && $extra !== '') {
-                    $hosts[] = '^'.preg_quote($extra, '/').'$';
+                    $hosts[] = '^(.+\.)?'.preg_quote($extra, '/').'$';
                 }
             }
 

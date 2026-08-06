@@ -12,12 +12,6 @@ use Illuminate\Support\Facades\Storage;
 
 class FarmImageAnalysisService
 {
-    private string $groqKey;
-
-    private string $visionModel;
-
-    private string $groqEndpoint;
-
     private string $plantNetKey;
 
     private string $plantNetEndpoint;
@@ -26,10 +20,8 @@ class FarmImageAnalysisService
         private WeatherService $weatherService,
         private DiseaseOutbreakService $outbreakService,
         private NotificationDispatcher $dispatcher,
+        private LlmChatClient $llm,
     ) {
-        $this->groqKey = trim(config('services.groq.api_key', ''));
-        $this->visionModel = trim(config('services.groq.vision_model', 'qwen/qwen3.6-27b'));
-        $this->groqEndpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
         $this->plantNetKey = trim(config('services.plantnet.api_key') ?? env('PLANTNET_API_KEY', ''));
         $this->plantNetEndpoint = trim(config('services.plantnet.endpoint') ?? 'https://my-api.plantnet.org/v2');
     }
@@ -221,10 +213,6 @@ class FarmImageAnalysisService
 
     private function callVisionModel(User $user, ?FarmField $field, string $base64Image, ?array $plantNetResult, string $lang = 'en'): array
     {
-        if (empty($this->groqKey)) {
-            return $this->fallbackResult('AI service is not configured.');
-        }
-
         $systemPrompt = $this->buildAnalysisPrompt($user, $field, $plantNetResult, $lang);
 
         $imageUrl = $base64Image;
@@ -250,51 +238,31 @@ class FarmImageAnalysisService
         ];
 
         try {
-            Log::info('Groq: sending farm image analysis request', ['model' => $this->visionModel]);
+            $content = $this->llm->chat($messages, [
+                'timeout' => 90,
+                'max_tokens' => 2048,
+                'temperature' => 0.3,
+            ]);
 
-            $response = Http::timeout(90)
-                ->withToken($this->groqKey)
-                ->acceptJson()
-                ->post($this->groqEndpoint, [
-                    'model' => $this->visionModel,
-                    'messages' => $messages,
-                    'max_tokens' => 2048,
-                    'temperature' => 0.3,
-                ]);
+            $cleaned = trim(preg_replace('/```json\s*|\s*```/', '', $content) ?? $content);
+            $parsed = json_decode($cleaned, true);
 
-            if ($response->successful()) {
-                $data = $response->json();
-                $content = $data['choices'][0]['message']['content'] ?? '';
-
-                Log::info('Groq: farm image analysis response received', ['model' => $this->visionModel]);
-                $content = trim($content);
-
-                $cleaned = preg_replace('/```json\s*|\s*```/', '', $content);
-                $cleaned = trim($cleaned);
-
-                $parsed = json_decode($cleaned, true);
-
-                if (json_last_error() === JSON_ERROR_NONE && isset($parsed['condition'])) {
-                    $parsed['condition'] = $this->normalizeCondition($parsed['condition']);
-                    if ($plantNetResult && ($plantNetResult['identified'] ?? false)) {
-                        $parsed['plantIdentification'] = $plantNetResult['bestMatch'] ?? null;
-                    }
-
-                    return $parsed;
+            if (json_last_error() === JSON_ERROR_NONE && isset($parsed['condition'])) {
+                $parsed['condition'] = $this->normalizeCondition($parsed['condition']);
+                if ($plantNetResult && ($plantNetResult['identified'] ?? false)) {
+                    $parsed['plantIdentification'] = $plantNetResult['bestMatch'] ?? null;
                 }
 
-                Log::warning('Vision model returned non-JSON', ['raw' => substr($content, 0, 500)]);
-
-                return $this->parseUnstructuredResponse($content, $plantNetResult);
+                return $parsed;
             }
 
-            Log::error('Groq vision API error', ['status' => $response->status()]);
+            Log::warning('Vision model returned non-JSON', ['raw' => substr($content, 0, 500)]);
+
+            return $this->parseUnstructuredResponse($content, $plantNetResult);
+        } catch (\Throwable $e) {
+            Log::error('Vision analysis exception', ['error' => $e->getMessage()]);
 
             return $this->fallbackResult('AI analysis service is temporarily unavailable. Please try again.');
-        } catch (\Exception $e) {
-            Log::error('Vision analysis exception', ['exception' => $e::class]);
-
-            return $this->fallbackResult('Analysis timed out. The image may be too large, or the service is busy. Please try again.');
         }
     }
 

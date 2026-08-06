@@ -14,12 +14,17 @@ class SnapshotSystemHealth extends Command
     public function handle(): int
     {
         $now = now();
-        DB::table('provider_health_snapshots')->insert([
-            'provider' => 'github-models',
-            'status' => filled(config('services.groq.api_key')) ? 'configured' : 'not_configured',
-            'latency_ms' => null, 'safe_error_code' => null, 'checked_at' => $now,
-            'created_at' => $now, 'updated_at' => $now,
-        ]);
+        foreach ([
+            'nvidia' => filled(config('services.nvidia.api_key')),
+            'groq' => filled(config('services.groq.api_key')),
+        ] as $provider => $configured) {
+            DB::table('provider_health_snapshots')->insert([
+                'provider' => $provider,
+                'status' => $configured ? 'configured' : 'not_configured',
+                'latency_ms' => null, 'safe_error_code' => null, 'checked_at' => $now,
+                'created_at' => $now, 'updated_at' => $now,
+            ]);
+        }
         DB::table('system_job_runs')->insert([
             'job_type' => 'scheduler.health_snapshot', 'status' => 'completed',
             'started_at' => $now, 'heartbeat_at' => $now, 'finished_at' => $now,

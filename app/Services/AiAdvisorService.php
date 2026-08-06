@@ -8,26 +8,16 @@ use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\JournalEntry;
 use App\Models\User;
-use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AiAdvisorService
 {
-    private string $apiKey;
-
-    private string $model;
-
-    private string $endpoint;
-
-    public function __construct(private WeatherService $weatherService)
-    {
-        $this->apiKey = trim(config('services.groq.api_key', ''));
-        $this->model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
-        $this->endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
-    }
+    public function __construct(
+        private WeatherService $weatherService,
+        private LlmChatClient $llm,
+    ) {}
 
     /**
      * Chat with the AI advisor, passing full user context.
@@ -56,7 +46,7 @@ class AiAdvisorService
             ];
         }
 
-        $reply = $this->callGroq($messages);
+        $reply = $this->askLlm($messages);
 
         AdvisorConversation::create([
             'user_id' => $user->id,
@@ -131,7 +121,7 @@ class AiAdvisorService
             ['role' => 'user', 'content' => 'Give me 2 short, actionable farming insights for today based on my farm conditions and current weather. Each insight should have a title (max 8 words) and a description (max 30 words). Return ONLY valid JSON array: [{"title": "...", "description": "..."}]'],
         ];
 
-        $reply = $this->callGroq($messages);
+        $reply = $this->askLlm($messages, ['temperature' => 0.4, 'max_tokens' => 512]);
 
         $cleaned = preg_replace('/```json\s*|\s*```/', '', $reply);
         $cleaned = trim($cleaned);
@@ -431,52 +421,20 @@ PROMPT;
             ->values();
     }
 
-    private function callGroq(array $messages): string
+    /**
+     * @param  array<int, array<string, mixed>>  $messages
+     * @param  array<string, mixed>  $options
+     */
+    private function askLlm(array $messages, array $options = []): string
     {
-        if (empty($this->apiKey)) {
-            Log::error('Groq: API key missing. Set GROQ_API_KEY in .env');
-
-            return 'AI advisor is not configured. Please contact support.';
-        }
-
         try {
-            Log::info('Groq: sending chat request', ['model' => $this->model, 'message_count' => count($messages)]);
-
-            $response = Http::timeout(45)
-                ->withToken($this->apiKey)
-                ->acceptJson()
-                ->post($this->endpoint, [
-                    'model' => $this->model,
-                    'messages' => $messages,
-                    'max_tokens' => 1024,
-                    'temperature' => 0.5,
-                ]);
-
-            if ($response->successful()) {
-                $data = $response->json();
-                $content = $data['choices'][0]['message']['content'] ?? '';
-
-                Log::info('Groq: chat response received', ['model' => $this->model]);
-
-                return trim($content);
-            }
-
-            Log::error('Groq API error', ['status' => $response->status(), 'model' => $this->model]);
-
-            if ($response->status() === 401) {
-                return 'AI advisor is not set up correctly. Please contact support.';
-            }
-            if ($response->status() === 429) {
-                return 'AI is busy right now. Please try again in a minute.';
-            }
-
-            return 'I apologize, but I\'m having trouble connecting right now. Please try again in a moment.';
-        } catch (ConnectionException $e) {
-            Log::error('Groq connection failed', ['message' => $e->getMessage()]);
-
-            return 'Connection to AI service timed out. Please check your internet and try again.';
-        } catch (\Exception $e) {
-            Log::error('Groq exception', ['exception' => $e::class]);
+            return $this->llm->chat($messages, array_merge([
+                'timeout' => 45,
+                'max_tokens' => 1024,
+                'temperature' => 0.5,
+            ], $options));
+        } catch (\Throwable $e) {
+            Log::error('AI advisor request failed', ['error' => $e->getMessage()]);
 
             return 'I\'m temporarily unavailable. Please try again shortly.';
         }
