@@ -7,7 +7,7 @@ Backend for the AgroAide mobile farm assistant: auth, farm records, weather, AI 
 - PHP 8.2+ / Laravel 12
 - Laravel Sanctum (API tokens)
 - MySQL (or SQLite for local/testing)
-- Open-Meteo, GitHub Models, Groq Whisper, optional PlantNet, Firebase FCM
+- Open-Meteo, Groq vision/text/Whisper, optional PlantNet, Firebase FCM
 
 ## Quick start
 
@@ -36,8 +36,7 @@ Copy `.env.example` → `.env`. **Never commit** `.env` or service-account JSON.
 |----------|---------|
 | `APP_KEY` | Laravel encryption key |
 | `DB_*` | Database |
-| `GITHUB_MODELS_API_KEY` | LLM + vision (advisor, scan) |
-| `GROQ_API_KEY` | Voice transcription ([console.groq.com](https://console.groq.com/keys)) |
+| `GROQ_API_KEY` | Crop vision and voice transcription ([console.groq.com](https://console.groq.com/keys)) |
 | `PLANTNET_API_KEY` | Optional plant ID assist |
 | `FCM_PROJECT_ID` | Firebase project id |
 | `FCM_CREDENTIALS_PATH` | Path to Firebase service account JSON (gitignored) |
@@ -64,10 +63,10 @@ Focused suites: outbreak distance, auth API, scan history ownership.
 - Only canonical diseased scans that are auto-verified or expert-verified can alter field health or contribute to outbreak aggregates. Legacy and disputed scans remain ineligible.
 - Terms and privacy metadata is available at `GET /api/legal`; public pages are `/legal/terms` and `/legal/privacy`.
 - Registration requires `termsVersion` and `privacyVersion`. `researchConsent` is a separate optional boolean. Existing users receive HTTP 428 with `consentRequired: true` until `POST /api/auth/consent` records current versions.
-- Personal-data controls: `GET /api/privacy/export`, combined `DELETE /api/privacy/histories`, individual `DELETE /api/farm/scan-history/{id}`, `DELETE /api/advisor/history`, and password-confirmed `DELETE /api/auth/account`.
+- Personal-data controls: `GET /api/privacy/export`, individual `DELETE /api/farm/scan-history/{id}`, `DELETE /api/advisor/history`, and password-confirmed `DELETE /api/auth/account`.
 - Retention is versioned in `config/security.php`: exports/temp media/OTPs, sync action logs, advisor conversations, and notifications are purged by `agroaide:purge-expired-personal-data`.
 
-AI preferences are persisted through `PUT /api/auth/profile` as `aiResponseDepth` (`concise|balanced|deep`), `aiRiskTolerance` (`cautious|balanced|bold`), and `voiceTips` (boolean).
+AI preferences are persisted through `PUT /api/auth/profile` as `aiResponseDepth` (`concise|balanced|deep`) and `aiRiskTolerance` (`cautious|balanced|bold`).
 
 ## Useful artisan commands
 
@@ -84,6 +83,15 @@ php artisan agroaide:health-snapshot
 ```
 
 The staff dashboard is served same-origin at `/staff/login` using the local Vite/Tailwind build. Agronomists review scans and read aggregate evaluation metrics; administrator-only pages manage run queueing, confidence-policy activation, staff roles, and audit details. Staff credentials are created interactively; no credentials are seeded or sourced from environment variables. In production, Supervisor runs the database-backed diagnosis/evaluation worker and Laravel scheduler.
+
+Create the first administrator interactively:
+
+```bash
+php artisan migrate
+php artisan agroaide:staff-account your-email@example.com --role=admin
+```
+
+The command securely asks for the administrator's name and hidden password. Then sign in at `http://127.0.0.1:8000/staff/login`, or replace `127.0.0.1` with the backend server/LAN address.
 
 `POST /api/farm/scans/{scan}/feedback` is throttled and idempotent per farmer/scan: repeated taps update the current feedback record instead of creating duplicate metric events.
 

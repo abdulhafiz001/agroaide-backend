@@ -16,8 +16,8 @@ class VoiceTranscriptionService
     public function __construct()
     {
         $this->apiKey = trim(config('services.groq.api_key') ?? env('GROQ_API_KEY', ''));
-        $this->endpoint = config('services.groq.endpoint') ?? 'https://api.groq.com/openai/v1/audio/transcriptions';
-        $this->model = config('services.groq.model') ?? 'whisper-large-v3';
+        $this->endpoint = config('services.groq.transcription_endpoint') ?? 'https://api.groq.com/openai/v1/audio/transcriptions';
+        $this->model = config('services.groq.transcription_model') ?? 'whisper-large-v3';
     }
 
     public function isAvailable(): bool

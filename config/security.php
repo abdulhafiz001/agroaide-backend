@@ -17,7 +17,6 @@ return [
         'transcription' => [10, 1],
         'sync' => [30, 1],
         'export' => [3, 60],
-        'privacy-write' => [5, 60],
         'feedback' => [10, 60],
         'staff-login' => [5, 15],
     ],

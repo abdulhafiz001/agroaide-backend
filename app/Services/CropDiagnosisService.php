@@ -6,6 +6,7 @@ use App\Models\ConfidencePolicy;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class CropDiagnosisService
@@ -24,12 +25,11 @@ class CropDiagnosisService
             ? ConfidencePolicy::findOrFail($versions['confidence_policy_id'])
             : ConfidencePolicy::where('active', true)->latest('id')->firstOrFail();
         $started = hrtime(true);
+        Log::info('Groq crop diagnosis request started', ['model' => $model->model_identifier]);
         $response = Http::timeout(90)
-            ->withToken((string) config('services.github_models.api_key'))
-            ->withHeaders([
-                'Accept' => 'application/vnd.github+json',
-                'X-GitHub-Api-Version' => config('services.github_models.api_version', '2022-11-28'),
-            ])->post(config('services.github_models.endpoint'), [
+            ->withToken((string) config('services.groq.api_key'))
+            ->acceptJson()
+            ->post(config('services.groq.chat_endpoint'), [
                 'model' => $model->model_identifier,
                 'messages' => [
                     ['role' => 'system', 'content' => $prompt->system_prompt],
@@ -38,12 +38,22 @@ class CropDiagnosisService
                         ['type' => 'image_url', 'image_url' => ['url' => $imageDataUrl]],
                     ]],
                 ],
+                'response_format' => ['type' => 'json_object'],
                 ...$model->parameters,
             ]);
         $latency = (int) round((hrtime(true) - $started) / 1_000_000);
         if (! $response->successful()) {
+            Log::error('Groq crop diagnosis request failed', [
+                'model' => $model->model_identifier,
+                'status' => $response->status(),
+                'error' => data_get($response->json(), 'error.message', 'unknown provider error'),
+            ]);
             throw new RuntimeException('diagnosis_provider_error');
         }
+        Log::info('Groq crop diagnosis response received', [
+            'model' => $model->model_identifier,
+            'latency_ms' => $latency,
+        ]);
 
         $raw = (string) data_get($response->json(), 'choices.0.message.content', '');
         $clean = trim(preg_replace('/^```(?:json)?|```$/m', '', $raw) ?? $raw);

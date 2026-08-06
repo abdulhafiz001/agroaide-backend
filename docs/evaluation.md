@@ -1,6 +1,6 @@
 # Diagnosis evaluation
 
-Evaluation runs are measurements, not claims that AgroAide has trained a model. The seeded GitHub Models entry identifies the configured inference provider/version and prompt; it contains no accuracy value.
+Evaluation runs are measurements, not claims that AgroAide has trained a model. The seeded Groq model entry identifies the configured inference provider/version and prompt; it contains no accuracy value.
 
 Import a private dataset:
 

@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\AdvisorConversation;
 use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\PasswordResetOtp;
@@ -127,7 +126,7 @@ class SecurityPrivacyFoundationTest extends TestCase
 
     public function test_ai_preferences_are_persisted_serialized_and_applied_to_prompt(): void
     {
-        config(['services.github_models.api_key' => 'test-key']);
+        config(['services.groq.api_key' => 'test-key']);
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'Done']]]])]);
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -135,15 +134,12 @@ class SecurityPrivacyFoundationTest extends TestCase
         $this->putJson('/api/auth/profile', [
             'aiResponseDepth' => 'deep',
             'aiRiskTolerance' => 'cautious',
-            'voiceTips' => false,
         ])->assertOk()
-            ->assertJsonPath('profile.aiResponseDepth', 'deep')
-            ->assertJsonPath('profile.voiceTips', false);
+            ->assertJsonPath('profile.aiResponseDepth', 'deep');
 
         $this->postJson('/api/advisor/chat', ['message' => 'What should I do?'])->assertOk();
         Http::assertSent(fn ($request) => str_contains($request['messages'][0]['content'], 'RESPONSE DEPTH (deep)')
-            && str_contains($request['messages'][0]['content'], 'RISK STYLE (cautious)')
-            && str_contains($request['messages'][0]['content'], 'Do not add optional voice'));
+            && str_contains($request['messages'][0]['content'], 'RISK STYLE (cautious)'));
     }
 
     public function test_export_and_immediate_account_deletion(): void
@@ -155,26 +151,6 @@ class SecurityPrivacyFoundationTest extends TestCase
             ->assertHeader('content-type', 'application/json');
         $this->deleteJson('/api/auth/account', ['password' => 'secret-pass'])->assertOk();
         $this->assertDatabaseMissing('users', ['id' => $user->id]);
-    }
-
-    public function test_combined_history_deletion_removes_only_current_users_advisor_and_scan_data(): void
-    {
-        $user = User::factory()->create();
-        $other = User::factory()->create();
-        AdvisorConversation::create(['user_id' => $user->id, 'role' => 'user', 'message' => 'Private question']);
-        AdvisorConversation::create(['user_id' => $other->id, 'role' => 'user', 'message' => 'Keep me']);
-        FarmImageAnalysis::create(['user_id' => $user->id, 'condition' => 'healthy']);
-        FarmImageAnalysis::create(['user_id' => $other->id, 'condition' => 'healthy']);
-        Sanctum::actingAs($user);
-
-        $this->deleteJson('/api/privacy/histories')->assertOk()
-            ->assertJsonPath('deleted.advisorConversations', 1)
-            ->assertJsonPath('deleted.scans', 1);
-
-        $this->assertDatabaseMissing('advisor_conversations', ['user_id' => $user->id]);
-        $this->assertDatabaseMissing('farm_image_analyses', ['user_id' => $user->id]);
-        $this->assertDatabaseHas('advisor_conversations', ['user_id' => $other->id]);
-        $this->assertDatabaseHas('farm_image_analyses', ['user_id' => $other->id]);
     }
 
     public function test_login_rate_limiter_is_attached(): void

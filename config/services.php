@@ -35,13 +35,6 @@ return [
         ],
     ],
 
-    'github_models' => [
-        'api_key' => env('GITHUB_MODELS_API_KEY'),
-        'model' => 'openai/gpt-4o-mini',
-        'endpoint' => 'https://models.github.ai/inference/chat/completions',
-        'api_version' => '2022-11-28',
-    ],
-
     'plantnet' => [
         'api_key' => env('PLANTNET_API_KEY'),
         'endpoint' => 'https://my-api.plantnet.org/v2',
@@ -49,8 +42,11 @@ return [
 
     'groq' => [
         'api_key' => env('GROQ_API_KEY'),
-        'endpoint' => 'https://api.groq.com/openai/v1/audio/transcriptions',
-        'model' => 'whisper-large-v3',
+        'chat_endpoint' => 'https://api.groq.com/openai/v1/chat/completions',
+        'text_model' => 'qwen/qwen3.6-27b',
+        'vision_model' => 'qwen/qwen3.6-27b',
+        'transcription_endpoint' => 'https://api.groq.com/openai/v1/audio/transcriptions',
+        'transcription_model' => 'whisper-large-v3',
     ],
 
     'fcm' => [

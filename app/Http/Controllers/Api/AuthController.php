@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -28,7 +29,7 @@ class AuthController extends Controller
         $validated = $request->validate([
             'fullName' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
-            'password' => ['required', 'string', 'confirmed', 'min:8'],
+            'password' => ['required', 'string', 'confirmed', Password::min(8)->letters()->numbers()],
             'phoneNumber' => ['nullable', 'string', 'max:32'],
             'farmName' => ['nullable', 'string', 'max:255'],
             'farmLocation' => ['nullable', 'string', 'max:255'],
@@ -169,7 +170,6 @@ class AuthController extends Controller
             'irrigationAccess' => ['nullable', Rule::in(['rain-fed', 'drip', 'sprinkler', 'flood'])],
             'aiResponseDepth' => ['nullable', Rule::in(['concise', 'balanced', 'deep'])],
             'aiRiskTolerance' => ['nullable', Rule::in(['cautious', 'balanced', 'bold'])],
-            'voiceTips' => ['nullable', 'boolean'],
         ]);
 
         $updateData = [];
@@ -222,9 +222,6 @@ class AuthController extends Controller
         }
         if (isset($validated['aiRiskTolerance'])) {
             $updateData['ai_risk_tolerance'] = $validated['aiRiskTolerance'];
-        }
-        if (array_key_exists('voiceTips', $validated)) {
-            $updateData['ai_voice_tips'] = $validated['voiceTips'];
         }
         if (array_key_exists('pushToken', $validated)) {
             $updateData['push_token'] = $validated['pushToken'];
@@ -415,7 +412,6 @@ class AuthController extends Controller
             'notificationPreferences' => $this->resolveNotificationPreferences($user),
             'aiResponseDepth' => $user->ai_response_depth ?? 'balanced',
             'aiRiskTolerance' => $user->ai_risk_tolerance ?? 'balanced',
-            'voiceTips' => (bool) ($user->ai_voice_tips ?? true),
             'consentRequired' => ! $user->consents()
                 ->where('terms_version', config('legal.terms.version'))
                 ->where('privacy_version', config('legal.privacy.version'))

@@ -2,9 +2,9 @@
 
 return [
     'model' => [
-        'provider' => 'github-models',
-        'identifier' => 'openai/gpt-4o-mini',
-        'version' => '2026-08-06',
+        'provider' => 'groq',
+        'identifier' => 'qwen/qwen3.6-27b',
+        'version' => '2026-08-06-groq',
         'parameters' => ['temperature' => 0.0, 'max_tokens' => 2048],
     ],
     'prompt' => [

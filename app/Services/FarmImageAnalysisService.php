@@ -12,13 +12,11 @@ use Illuminate\Support\Facades\Storage;
 
 class FarmImageAnalysisService
 {
-    private string $githubModelsKey;
+    private string $groqKey;
 
     private string $visionModel;
 
-    private string $githubModelsEndpoint;
-
-    private string $githubModelsApiVersion;
+    private string $groqEndpoint;
 
     private string $plantNetKey;
 
@@ -29,10 +27,9 @@ class FarmImageAnalysisService
         private DiseaseOutbreakService $outbreakService,
         private NotificationDispatcher $dispatcher,
     ) {
-        $this->githubModelsKey = trim(config('services.github_models.api_key', ''));
-        $this->visionModel = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-        $this->githubModelsEndpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-        $this->githubModelsApiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+        $this->groqKey = trim(config('services.groq.api_key', ''));
+        $this->visionModel = trim(config('services.groq.vision_model', 'qwen/qwen3.6-27b'));
+        $this->groqEndpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
         $this->plantNetKey = trim(config('services.plantnet.api_key') ?? env('PLANTNET_API_KEY', ''));
         $this->plantNetEndpoint = trim(config('services.plantnet.endpoint') ?? 'https://my-api.plantnet.org/v2');
     }
@@ -224,7 +221,7 @@ class FarmImageAnalysisService
 
     private function callVisionModel(User $user, ?FarmField $field, string $base64Image, ?array $plantNetResult, string $lang = 'en'): array
     {
-        if (empty($this->githubModelsKey)) {
+        if (empty($this->groqKey)) {
             return $this->fallbackResult('AI service is not configured.');
         }
 
@@ -253,16 +250,12 @@ class FarmImageAnalysisService
         ];
 
         try {
-            Log::info('GitHub Models: sending farm image analysis request', ['model' => $this->visionModel]);
+            Log::info('Groq: sending farm image analysis request', ['model' => $this->visionModel]);
 
             $response = Http::timeout(90)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.$this->githubModelsKey,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => $this->githubModelsApiVersion,
-                    'Content-Type' => 'application/json',
-                ])
-                ->post($this->githubModelsEndpoint, [
+                ->withToken($this->groqKey)
+                ->acceptJson()
+                ->post($this->groqEndpoint, [
                     'model' => $this->visionModel,
                     'messages' => $messages,
                     'max_tokens' => 2048,
@@ -273,7 +266,7 @@ class FarmImageAnalysisService
                 $data = $response->json();
                 $content = $data['choices'][0]['message']['content'] ?? '';
 
-                Log::info('GitHub Models: farm image analysis response received', ['model' => $this->visionModel]);
+                Log::info('Groq: farm image analysis response received', ['model' => $this->visionModel]);
                 $content = trim($content);
 
                 $cleaned = preg_replace('/```json\s*|\s*```/', '', $content);
@@ -295,7 +288,7 @@ class FarmImageAnalysisService
                 return $this->parseUnstructuredResponse($content, $plantNetResult);
             }
 
-            Log::error('GitHub Models vision API error', ['status' => $response->status()]);
+            Log::error('Groq vision API error', ['status' => $response->status()]);
 
             return $this->fallbackResult('AI analysis service is temporarily unavailable. Please try again.');
         } catch (\Exception $e) {

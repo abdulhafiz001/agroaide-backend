@@ -29,7 +29,7 @@ return new class extends Migration
             $table->foreignId('canonical_label_id')->constrained()->cascadeOnDelete();
             $table->string('normalized_alias');
             $table->timestamps();
-            $table->unique(['canonical_label_id', 'normalized_alias']);
+            $table->unique(['canonical_label_id', 'normalized_alias'], 'label_alias_unique');
             $table->index('normalized_alias');
         });
         Schema::create('model_versions', function (Blueprint $table): void {
@@ -41,7 +41,7 @@ return new class extends Migration
             $table->string('checksum', 64);
             $table->boolean('active')->default(false)->index();
             $table->timestamps();
-            $table->unique(['provider', 'model_identifier', 'version']);
+            $table->unique(['provider', 'model_identifier', 'version'], 'model_version_unique');
         });
         Schema::create('prompt_versions', function (Blueprint $table): void {
             $table->id();
@@ -52,7 +52,7 @@ return new class extends Migration
             $table->string('checksum', 64);
             $table->boolean('active')->default(false)->index();
             $table->timestamps();
-            $table->unique(['name', 'version']);
+            $table->unique(['name', 'version'], 'prompt_version_unique');
         });
         Schema::create('confidence_policies', function (Blueprint $table): void {
             $table->id();
@@ -64,7 +64,7 @@ return new class extends Migration
             $table->string('checksum', 64);
             $table->boolean('active')->default(false)->index();
             $table->timestamps();
-            $table->unique(['name', 'version']);
+            $table->unique(['name', 'version'], 'confidence_policy_unique');
         });
 
         Schema::table('farm_image_analyses', function (Blueprint $table): void {
@@ -100,7 +100,7 @@ return new class extends Migration
             $table->string('verdict', 16);
             $table->text('comment')->nullable();
             $table->timestamps();
-            $table->index(['farm_image_analysis_id', 'created_at']);
+            $table->index(['farm_image_analysis_id', 'created_at'], 'scan_feedback_scan_created_idx');
         });
         Schema::create('scan_review_history', function (Blueprint $table): void {
             $table->id();
@@ -112,7 +112,7 @@ return new class extends Migration
             $table->foreignId('effective_disease_label_id')->nullable()->constrained('canonical_labels')->restrictOnDelete();
             $table->text('reason')->nullable();
             $table->timestamps();
-            $table->index(['farm_image_analysis_id', 'created_at']);
+            $table->index(['farm_image_analysis_id', 'created_at'], 'scan_review_scan_created_idx');
         });
 
         Schema::create('evaluation_datasets', function (Blueprint $table): void {
@@ -125,7 +125,7 @@ return new class extends Migration
             $table->foreignId('created_by')->constrained('users')->restrictOnDelete();
             $table->timestamp('locked_at')->nullable();
             $table->timestamps();
-            $table->unique(['name', 'version']);
+            $table->unique(['name', 'version'], 'evaluation_dataset_version_unique');
         });
         Schema::create('evaluation_dataset_items', function (Blueprint $table): void {
             $table->id();
@@ -138,8 +138,8 @@ return new class extends Migration
             $table->text('ground_truth_provenance');
             $table->json('metadata')->nullable();
             $table->timestamps();
-            $table->unique(['evaluation_dataset_id', 'external_id']);
-            $table->index(['evaluation_dataset_id', 'disease_label_id']);
+            $table->unique(['evaluation_dataset_id', 'external_id'], 'eval_item_external_unique');
+            $table->index(['evaluation_dataset_id', 'disease_label_id'], 'eval_item_disease_idx');
         });
         Schema::create('evaluation_runs', function (Blueprint $table): void {
             $table->id();
@@ -168,7 +168,7 @@ return new class extends Migration
             $table->longText('raw_result');
             $table->string('raw_result_checksum', 64);
             $table->timestamps();
-            $table->unique(['evaluation_run_id', 'evaluation_dataset_item_id']);
+            $table->unique(['evaluation_run_id', 'evaluation_dataset_item_id'], 'eval_prediction_item_unique');
         });
         Schema::create('evaluation_class_metrics', function (Blueprint $table): void {
             $table->id();
@@ -183,7 +183,7 @@ return new class extends Migration
             $table->decimal('f1', 10, 8)->nullable();
             $table->decimal('fpr', 10, 8)->nullable();
             $table->timestamps();
-            $table->unique(['evaluation_run_id', 'canonical_label_id']);
+            $table->unique(['evaluation_run_id', 'canonical_label_id'], 'eval_class_metric_unique');
         });
 
         Schema::create('audit_logs', function (Blueprint $table): void {
@@ -195,7 +195,7 @@ return new class extends Migration
             $table->json('safe_context')->nullable();
             $table->string('request_fingerprint', 64)->nullable();
             $table->timestamps();
-            $table->index(['subject_type', 'subject_id', 'created_at']);
+            $table->index(['subject_type', 'subject_id', 'created_at'], 'audit_subject_created_idx');
         });
         Schema::create('outbreak_events', function (Blueprint $table): void {
             $table->id();

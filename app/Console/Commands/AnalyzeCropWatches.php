@@ -209,22 +209,17 @@ class AnalyzeCropWatches extends Command
             return false;
         }
 
-        $apiKey = trim(config('services.github_models.api_key', ''));
+        $apiKey = trim(config('services.groq.api_key', ''));
         if ($apiKey === '') {
             return false;
         }
 
         try {
-            $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-            $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-            $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+            $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
+            $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
             $response = Http::timeout(12)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.$apiKey,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => $apiVersion,
-                    'Content-Type' => 'application/json',
-                ])
+                ->withToken($apiKey)
+                ->acceptJson()
                 ->post($endpoint, [
                     'model' => $model,
                     'messages' => [
@@ -259,7 +254,7 @@ class AnalyzeCropWatches extends Command
                 : "It is a good window to plant {$crop} around {$placeLabel}.",
         };
 
-        $apiKey = trim(config('services.github_models.api_key', ''));
+        $apiKey = trim(config('services.groq.api_key', ''));
         if ($apiKey === '') {
             return $fallback;
         }
@@ -269,16 +264,11 @@ class AnalyzeCropWatches extends Command
             .'Mention the place name so they know the app knows where they farm. Do not invent other crops.';
 
         try {
-            $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-            $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-            $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+            $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
+            $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
             $response = Http::timeout(12)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.$apiKey,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => $apiVersion,
-                    'Content-Type' => 'application/json',
-                ])
+                ->withToken($apiKey)
+                ->acceptJson()
                 ->post($endpoint, [
                     'model' => $model,
                     'messages' => [

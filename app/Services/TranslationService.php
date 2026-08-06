@@ -14,8 +14,6 @@ class TranslationService
 
     private string $endpoint;
 
-    private string $apiVersion;
-
     private const LANGUAGE_NAMES = [
         'en' => 'English',
         'ha' => 'Hausa',
@@ -25,10 +23,9 @@ class TranslationService
 
     public function __construct()
     {
-        $this->apiKey = trim(config('services.github_models.api_key', ''));
-        $this->model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-        $this->endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-        $this->apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+        $this->apiKey = trim(config('services.groq.api_key', ''));
+        $this->model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
+        $this->endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
     }
 
     public static function languageName(string $code): string
@@ -66,15 +63,11 @@ class TranslationService
         }
 
         try {
-            Log::info('GitHub Models: translating text', ['target_lang' => $langName, 'model' => $this->model]);
+            Log::info('Groq: translating text', ['target_lang' => $langName, 'model' => $this->model]);
 
             $response = Http::timeout(20)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.$this->apiKey,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => $this->apiVersion,
-                    'Content-Type' => 'application/json',
-                ])
+                ->withToken($this->apiKey)
+                ->acceptJson()
                 ->post($this->endpoint, [
                     'model' => $this->model,
                     'messages' => [
@@ -90,12 +83,12 @@ class TranslationService
 
             if ($response->successful()) {
                 $content = $response->json('choices.0.message.content') ?? $text;
-                Log::info('GitHub Models: translation complete', ['target_lang' => $langName]);
+                Log::info('Groq: translation complete', ['target_lang' => $langName]);
 
                 return trim($content);
             }
 
-            Log::warning('GitHub Models translation failed', ['status' => $response->status(), 'body' => $response->body()]);
+            Log::warning('Groq translation failed', ['status' => $response->status(), 'body' => $response->body()]);
 
             return $text;
         } catch (\Exception $e) {

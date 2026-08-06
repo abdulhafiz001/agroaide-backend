@@ -102,5 +102,4 @@ Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void 
     Route::get('/outbreak/heatmap', [OutbreakController::class, 'heatmap']);
     Route::get('/outbreak/alerts', [OutbreakController::class, 'alerts']);
     Route::get('/privacy/export', [PrivacyController::class, 'export'])->middleware('throttle:export');
-    Route::delete('/privacy/histories', [PrivacyController::class, 'clearHistories'])->middleware('throttle:privacy-write');
 });

@@ -37,7 +37,6 @@ class User extends Authenticatable
         'notification_preferences',
         'ai_response_depth',
         'ai_risk_tolerance',
-        'ai_voice_tips',
     ];
 
     protected $hidden = [
@@ -57,7 +56,6 @@ class User extends Authenticatable
             'farm_size_m2' => 'float',
             'farm_latitude' => 'float',
             'farm_longitude' => 'float',
-            'ai_voice_tips' => 'boolean',
         ];
     }
 

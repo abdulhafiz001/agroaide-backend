@@ -49,7 +49,8 @@ class DiagnosisDomainSeeder extends Seeder
         }
 
         $model = config('diagnosis.model');
-        ModelVersion::firstOrCreate(
+        ModelVersion::query()->update(['active' => false]);
+        ModelVersion::updateOrCreate(
             ['provider' => $model['provider'], 'model_identifier' => $model['identifier'], 'version' => $model['version']],
             ['parameters' => $model['parameters'], 'checksum' => hash('sha256', json_encode($model)), 'active' => true],
         );

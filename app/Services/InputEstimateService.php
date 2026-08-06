@@ -111,7 +111,7 @@ class InputEstimateService
         $langName = TranslationService::languageName($lang);
         $fallback = $this->buildFallbackSummary($user, $numbers);
 
-        $apiKey = trim(config('services.github_models.api_key', ''));
+        $apiKey = trim(config('services.groq.api_key', ''));
         if ($apiKey === '') {
             return $fallback;
         }
@@ -121,18 +121,13 @@ class InputEstimateService
             ."Include the disclaimer that it is a guide and may not be 100% correct.\n\n"
             .json_encode($numbers, JSON_PRETTY_PRINT);
 
-        $endpoint = trim(config('services.github_models.endpoint', 'https://models.github.ai/inference/chat/completions'));
-        $model = trim(config('services.github_models.model', 'openai/gpt-4o-mini'));
-        $apiVersion = trim(config('services.github_models.api_version', '2022-11-28'));
+        $endpoint = trim(config('services.groq.chat_endpoint', 'https://api.groq.com/openai/v1/chat/completions'));
+        $model = trim(config('services.groq.text_model', 'qwen/qwen3.6-27b'));
 
         $response = Http::timeout(3)
             ->connectTimeout(2)
-            ->withHeaders([
-                'Authorization' => 'Bearer '.$apiKey,
-                'Accept' => 'application/vnd.github+json',
-                'X-GitHub-Api-Version' => $apiVersion,
-                'Content-Type' => 'application/json',
-            ])
+            ->withToken($apiKey)
+            ->acceptJson()
             ->post($endpoint, [
                 'model' => $model,
                 'messages' => [

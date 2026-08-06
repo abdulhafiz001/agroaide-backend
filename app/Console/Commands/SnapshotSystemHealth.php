@@ -16,7 +16,7 @@ class SnapshotSystemHealth extends Command
         $now = now();
         DB::table('provider_health_snapshots')->insert([
             'provider' => 'github-models',
-            'status' => filled(config('services.github_models.api_key')) ? 'configured' : 'not_configured',
+            'status' => filled(config('services.groq.api_key')) ? 'configured' : 'not_configured',
             'latency_ms' => null, 'safe_error_code' => null, 'checked_at' => $now,
             'created_at' => $now, 'updated_at' => $now,
         ]);
