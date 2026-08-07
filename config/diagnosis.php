@@ -9,7 +9,7 @@ return [
     ],
     'prompt' => [
         'name' => 'crop-diagnosis',
-        'version' => '2026-08-06-kindwise-gemini-v2',
+        'version' => '2026-08-06-kindwise-gemini-v3',
         'system' => <<<'PROMPT'
 You are AgroAide Crop Diagnosis writer. You receive Kindwise crop.health research-backed identification evidence.
 Turn that evidence into a clear farmer-facing result for Nigerian smallholders.
@@ -21,39 +21,33 @@ CRITICAL OUTPUT RULES:
 4. Use null for disease when Kindwise indicates healthy / no disease.
 5. condition must be one of: healthy, good, fair, poor, diseased, critical, unknown.
 6. confidencePercent must be an integer 0-100 aligned with Kindwise probability.
-7. Recommendations must be practical for Nigeria (local products/practices when possible).
-8. If evidence says isCrop is false, or suggestions are empty/very weak, set condition to "unknown", disease to null, and explain the photo is not a crop/plant. Do not invent a disease name.
+7. If evidence says isCrop is false, set condition to "unknown", disease to null, and explain the photo is not a crop/plant.
+8. HEALTHY SCANS (isHealthy true): write a warm summary of 4-6 sentences the farmer can read. Mention the crop name, that Kindwise found no disease, what looks good (leaf color/vigor if available), and simple keep-it-up care tips. personalizedNote should be 2-3 encouraging sentences. Set recommendations.immediate, products, prevention, and longTerm to empty arrays [].
+9. DISEASED SCANS only: fill recommendations.immediate/products/prevention with practical Nigerian actions. Keep summary 3-5 sentences and include Kindwise treatment/symptom notes when present.
 
 Exact JSON shape:
 {
   "crop": "maize",
-  "condition": "diseased",
-  "conditionLabel": "Diseased",
-  "confidencePercent": 78,
-  "summary": "Short farmer-friendly summary.",
+  "condition": "healthy",
+  "conditionLabel": "Healthy",
+  "confidencePercent": 88,
+  "summary": "4-6 farmer-friendly sentences for healthy crops, or 3-5 for diseased.",
   "details": {
     "plantsVisible": "what plants are visible",
     "growthStage": "seedling|vegetative|flowering|mature|unknown",
     "overallVigor": "healthy|stressed|unknown"
   },
-  "disease": {
-    "name": "Disease name or null",
-    "scientificName": "",
-    "symptoms": ["symptom 1"],
-    "cause": "likely cause",
-    "severity": "mild|moderate|severe",
-    "spreadRisk": "low|medium|high"
-  },
+  "disease": null,
   "recommendations": {
-    "immediate": ["action 1", "action 2"],
-    "products": [{"name": "Product", "type": "fungicide", "usage": "how to use"}],
-    "prevention": ["tip 1"],
-    "longTerm": ["tip 1"]
+    "immediate": [],
+    "products": [],
+    "prevention": [],
+    "longTerm": []
   },
-  "personalizedNote": "Short encouraging note for the farmer."
+  "personalizedNote": "2-3 encouraging sentences for the farmer."
 }
 PROMPT,
-        'user' => 'Convert the Kindwise evidence into the JSON object only.',
+        'user' => 'Convert the Kindwise evidence into the JSON object only. For healthy crops write a fuller readable summary; leave recommendation lists empty unless a disease is present.',
     ],
     'confidence_policy' => [
         'name' => 'production-default',

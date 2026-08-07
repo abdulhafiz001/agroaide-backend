@@ -9,6 +9,7 @@ use App\Models\FieldTransaction;
 use App\Models\JournalEntry;
 use App\Models\ScanFeedback;
 use App\Models\User;
+use App\Services\DailyUsageLimitService;
 use App\Services\FarmImageAnalysisService;
 use App\Services\GeoAreaService;
 use App\Services\InputEstimateService;
@@ -27,6 +28,7 @@ class FarmController extends Controller
         private InputEstimateService $inputEstimateService,
         private MediaPayloadValidator $mediaValidator,
         private ScanVerificationService $scanVerification,
+        private DailyUsageLimitService $dailyLimits,
     ) {}
 
     public function overview(Request $request): JsonResponse
@@ -558,6 +560,7 @@ class FarmController extends Controller
 
         /** @var User $user */
         $user = $request->user();
+        $this->dailyLimits->assertCanScan($user);
 
         $media = $this->mediaValidator->image($validated['imageBase64']);
 

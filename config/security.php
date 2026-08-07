@@ -16,12 +16,18 @@ return [
         'image_max_pixels' => 24_000_000,
         'audio_max_bytes' => 10 * 1024 * 1024,
     ],
+    // Calendar-day caps per farmer (uses app timezone, default Africa/Lagos).
+    'daily_limits' => [
+        'scans' => (int) env('DAILY_SCAN_LIMIT', 4),
+        'chat_messages' => (int) env('DAILY_CHAT_LIMIT', 8),
+    ],
     'rate_limits' => [
         'register' => [5, 60],
         'login' => [10, 1],
         'recovery' => [5, 60],
-        'chat' => [20, 1],
-        'scan' => [10, 1],
+        // Burst protection (per minute). Hard daily caps are enforced separately.
+        'chat' => [8, 1],
+        'scan' => [4, 1],
         'transcription' => [10, 1],
         'sync' => [30, 1],
         'export' => [3, 60],

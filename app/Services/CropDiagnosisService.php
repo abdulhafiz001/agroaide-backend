@@ -106,6 +106,26 @@ class CropDiagnosisService
             $parsed['disease'] = null;
         }
 
+        $isHealthyResult = ! empty($kindwise['is_healthy'])
+            || in_array($parsed['condition'] ?? '', ['healthy', 'good'], true);
+        if ($isHealthyResult) {
+            $parsed['disease'] = null;
+            $parsed['recommendations'] = [
+                'immediate' => [],
+                'products' => [],
+                'prevention' => [],
+                'longTerm' => [],
+            ];
+            // If Gemini still returns a tiny summary, expand with Kindwise-backed copy.
+            if (str_word_count((string) ($parsed['summary'] ?? '')) < 28) {
+                $fallback = $this->fromKindwiseFallback($kindwise);
+                $parsed['summary'] = $fallback['summary'];
+                if (str_word_count((string) ($parsed['personalizedNote'] ?? '')) < 12) {
+                    $parsed['personalizedNote'] = $fallback['personalizedNote'];
+                }
+            }
+        }
+
         $confidencePercent = (int) round(max(0, min(1, (float) $kindwise['confidence'])) * 100);
         if ($confidencePercent > 0) {
             $parsed['confidencePercent'] = $confidencePercent;
@@ -196,6 +216,9 @@ class CropDiagnosisService
             default => 'English',
         };
 
+        $cropDetails = is_array($kindwise['crop']['details'] ?? null) ? $kindwise['crop']['details'] : [];
+        $diseaseDetails = is_array(data_get($kindwise, 'disease.details')) ? data_get($kindwise, 'disease.details') : [];
+
         $evidence = [
             'farmCropHint' => $context['crop'] ?? null,
             'kindwiseCrop' => $kindwise['crop'],
@@ -203,14 +226,31 @@ class CropDiagnosisService
             'isHealthy' => $kindwise['is_healthy'],
             'isCrop' => $kindwise['is_crop'] ?? true,
             'confidence' => $kindwise['confidence'],
+            'kindwiseCropNotes' => [
+                'commonNames' => $cropDetails['common_names'] ?? data_get($kindwise, 'crop.details.common_names'),
+                'description' => data_get($cropDetails, 'description.value')
+                    ?? data_get($cropDetails, 'wiki_description.value')
+                    ?? data_get($cropDetails, 'description'),
+            ],
+            'kindwiseDiseaseNotes' => [
+                'description' => data_get($diseaseDetails, 'description.value')
+                    ?? data_get($diseaseDetails, 'wiki_description.value'),
+                'symptoms' => $diseaseDetails['symptoms'] ?? null,
+                'treatment' => $diseaseDetails['treatment'] ?? null,
+                'severity' => $diseaseDetails['severity'] ?? null,
+            ],
             'cropSuggestions' => array_slice(data_get($kindwise, 'raw.result.crop.suggestions', []) ?: [], 0, 3),
             'diseaseSuggestions' => array_slice(data_get($kindwise, 'raw.result.disease.suggestions', []) ?: [], 0, 3),
         ];
 
+        $healthyHint = ! empty($kindwise['is_healthy'])
+            ? " This scan is HEALTHY: write a fuller 4-6 sentence summary and a 2-3 sentence personalizedNote using Kindwise crop notes. Leave recommendation arrays empty."
+            : ' This scan has a disease: fill recommendations for what the farmer should do.';
+
         $messages = [
             [
                 'role' => 'system',
-                'content' => $prompt->system_prompt."\n\nWrite every farmer-facing string in {$langName}. Never include thinking, analysis, or chain-of-thought — JSON only. If isCrop is false, set condition to unknown, disease to null, and explain that the photo is not a crop.",
+                'content' => $prompt->system_prompt."\n\nWrite every farmer-facing string in {$langName}. Never include thinking, analysis, or chain-of-thought — JSON only. If isCrop is false, set condition to unknown, disease to null, and explain that the photo is not a crop.{$healthyHint}",
             ],
             [
                 'role' => 'user',
@@ -270,20 +310,29 @@ class CropDiagnosisService
                 }
             }
         }
-        if ($immediate === []) {
-            $immediate = $healthy
-                ? ['Keep monitoring the field weekly', 'Maintain current watering and nutrient schedule']
-                : ['Isolate affected plants if practical', 'Ask a local extension officer before applying chemicals'];
+        if (! $healthy && $immediate === []) {
+            $immediate = ['Isolate affected plants if practical', 'Ask a local extension officer before applying chemicals'];
         }
+
+        $cropNote = (string) (
+            data_get($kindwise, 'crop.details.description.value')
+            ?? data_get($kindwise, 'crop.details.wiki_description.value')
+            ?? ''
+        );
+        $summary = $healthy
+            ? "Good news — your {$cropName} looks healthy. Kindwise crop.health did not find a disease on this photo, and the plant appearance matches a healthy crop. "
+                .'Keep watching the leaves for early spots or yellowing, and maintain your usual watering and nutrition schedule. '
+                .'If the field has been dry or very wet lately, check moisture at root level so the plants stay strong. '
+                .($cropNote !== '' ? 'Note from the identification: '.mb_substr(trim($cropNote), 0, 180).' ' : '')
+                .'Take another photo in a few days if anything changes.'
+            : "{$diseaseName} detected on {$cropName} (crop.health identification).";
 
         return [
             'crop' => $cropName,
             'condition' => $healthy ? 'healthy' : 'diseased',
             'conditionLabel' => $healthy ? 'Healthy' : 'Diseased',
             'confidencePercent' => max(1, $confidence),
-            'summary' => $healthy
-                ? "{$cropName} looks healthy based on crop.health identification."
-                : "{$diseaseName} detected on {$cropName} (crop.health identification).",
+            'summary' => $summary,
             'details' => [
                 'plantsVisible' => $cropName,
                 'growthStage' => 'unknown',
@@ -298,14 +347,16 @@ class CropDiagnosisService
                 'spreadRisk' => 'medium',
             ],
             'recommendations' => [
-                'immediate' => array_slice($immediate, 0, 4),
+                'immediate' => $healthy ? [] : array_slice($immediate, 0, 4),
                 'products' => [],
-                'prevention' => array_values(array_filter([
+                'prevention' => $healthy ? [] : array_values(array_filter([
                     is_string($treatment['prevention'] ?? null) ? trim((string) $treatment['prevention']) : null,
                 ])),
-                'longTerm' => ['Scout regularly and keep field records in AgroAide'],
+                'longTerm' => [],
             ],
-            'personalizedNote' => 'This result is based on Kindwise crop.health research-backed identification.',
+            'personalizedNote' => $healthy
+                ? "Your {$cropName} field looks in good shape today. Keep up regular scouting and you will catch problems early if they appear."
+                : 'This result is based on Kindwise crop.health research-backed identification.',
         ];
     }
 

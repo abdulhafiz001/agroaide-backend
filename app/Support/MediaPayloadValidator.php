@@ -43,7 +43,11 @@ class MediaPayloadValidator
         [$declaredMime, $encoded] = $this->parts($input);
         $bytes = $this->decode($encoded, (int) config('security.media.audio_max_bytes'));
         [$mime, $extension] = $this->detectAudio($bytes);
-        if ($mime === null || ($declaredMime !== null && ! $this->compatibleAudioMime($declaredMime, $mime))) {
+        // Expo/RN FileReader often labels blobs as application/octet-stream — trust magic bytes then.
+        $ignoreDeclared = $declaredMime === null
+            || in_array($declaredMime, ['application/octet-stream', 'binary/octet-stream', 'application/zip'], true);
+
+        if ($mime === null || (! $ignoreDeclared && ! $this->compatibleAudioMime($declaredMime, $mime))) {
             $this->invalid('audioBase64', 'The audio must be a valid MP3, WAV, M4A, OGG, or WebM file.');
         }
 

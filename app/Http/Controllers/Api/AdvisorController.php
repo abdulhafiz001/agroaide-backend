@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AiAdvisorService;
+use App\Services\DailyUsageLimitService;
 use App\Services\VoiceTranscriptionService;
 use App\Support\MediaPayloadValidator;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +17,7 @@ class AdvisorController extends Controller
         private AiAdvisorService $advisorService,
         private VoiceTranscriptionService $voiceService,
         private MediaPayloadValidator $mediaValidator,
+        private DailyUsageLimitService $dailyLimits,
     ) {}
 
     public function chat(Request $request): JsonResponse
@@ -28,6 +30,7 @@ class AdvisorController extends Controller
 
         /** @var User $user */
         $user = $request->user();
+        $this->dailyLimits->assertCanChat($user);
         $language = $validated['language'] ?? $validated['preferredLanguage'] ?? null;
         $reply = $this->advisorService->chat($user, trim($validated['message']), $language);
 
@@ -69,13 +72,21 @@ class AdvisorController extends Controller
         $validated = $request->validate([
             'audioBase64' => ['required', 'string'],
             'languageHint' => ['nullable', 'string', 'max:5'],
+            'language' => ['nullable', 'string', 'max:5'],
         ]);
 
         /** @var User $user */
         $user = $request->user();
-        $lang = $validated['languageHint'] ?? $user->preferred_language ?? 'en';
+        $lang = $validated['languageHint'] ?? $validated['language'] ?? $user->preferred_language ?? 'en';
 
-        $media = $this->mediaValidator->audio($validated['audioBase64']);
+        try {
+            $media = $this->mediaValidator->audio($validated['audioBase64']);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $message = collect($e->errors())->flatten()->first() ?: 'Invalid audio recording.';
+
+            return response()->json(['success' => false, 'error' => $message]);
+        }
+
         $result = $this->voiceService->transcribe($media, $lang);
 
         return response()->json($result);

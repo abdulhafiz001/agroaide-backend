@@ -73,6 +73,15 @@ class VoiceTranscriptionService
 
             $response = $request->post($this->endpoint, $fields);
 
+            // Retry once without a forced language if the provider rejects the language code.
+            if (! $response->successful() && isset($fields['language']) && $response->status() === 400) {
+                unset($fields['language']);
+                $response = Http::timeout(45)
+                    ->withToken($this->apiKey)
+                    ->attach('file', file_get_contents($tempPath), 'audio.'.$extension, ['Content-Type' => $mime])
+                    ->post($this->endpoint, $fields);
+            }
+
             if ($response->successful()) {
                 $text = trim((string) ($response->json('text') ?? ''));
                 if ($text === '') {
