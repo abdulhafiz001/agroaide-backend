@@ -10,6 +10,7 @@ use App\Services\VoiceTranscriptionService;
 use App\Support\MediaPayloadValidator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 
 class AdvisorController extends Controller
 {
@@ -81,7 +82,7 @@ class AdvisorController extends Controller
 
         try {
             $media = $this->mediaValidator->audio($validated['audioBase64']);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
             $message = collect($e->errors())->flatten()->first() ?: 'Invalid audio recording.';
 
             return response()->json(['success' => false, 'error' => $message]);

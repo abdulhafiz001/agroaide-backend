@@ -8,6 +8,7 @@ use App\Mail\WelcomeMail;
 use App\Models\PasswordResetOtp;
 use App\Models\User;
 use App\Models\UserConsent;
+use App\Services\AiAdvisorService;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -216,7 +217,7 @@ class AuthController extends Controller
         }
         if (isset($validated['preferredLanguage'])) {
             $updateData['preferred_language'] = $validated['preferredLanguage'];
-            \App\Services\AiAdvisorService::forgetDailyInsightCache((int) $user->id);
+            AiAdvisorService::forgetDailyInsightCache((int) $user->id);
         }
         if (isset($validated['aiResponseDepth'])) {
             $updateData['ai_response_depth'] = $validated['aiResponseDepth'];

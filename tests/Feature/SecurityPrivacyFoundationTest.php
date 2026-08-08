@@ -126,7 +126,13 @@ class SecurityPrivacyFoundationTest extends TestCase
 
     public function test_ai_preferences_are_persisted_serialized_and_applied_to_prompt(): void
     {
-        config(['services.groq.api_key' => 'test-key']);
+        // Force OpenAI-compatible Groq path so we can assert on `messages`.
+        // Local .env may set GEMINI_API_KEY, which would otherwise take priority.
+        config([
+            'services.gemini.api_key' => '',
+            'services.nvidia.api_key' => '',
+            'services.groq.api_key' => 'test-key',
+        ]);
         Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => 'Done']]]])]);
         $user = User::factory()->create();
         Sanctum::actingAs($user);
@@ -138,8 +144,13 @@ class SecurityPrivacyFoundationTest extends TestCase
             ->assertJsonPath('profile.aiResponseDepth', 'deep');
 
         $this->postJson('/api/advisor/chat', ['message' => 'What should I do?'])->assertOk();
-        Http::assertSent(fn ($request) => str_contains($request['messages'][0]['content'], 'RESPONSE DEPTH (deep)')
-            && str_contains($request['messages'][0]['content'], 'RISK STYLE (cautious)'));
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            $system = (string) ($data['messages'][0]['content'] ?? '');
+
+            return str_contains($system, 'RESPONSE DEPTH (deep)')
+                && str_contains($system, 'RISK STYLE (cautious)');
+        });
     }
 
     public function test_export_and_immediate_account_deletion(): void

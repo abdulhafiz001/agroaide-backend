@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ConfidencePolicy;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
+use Database\Seeders\DiagnosisDomainSeeder;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -244,7 +245,7 @@ class CropDiagnosisService
         ];
 
         $healthyHint = ! empty($kindwise['is_healthy'])
-            ? " This scan is HEALTHY: write a fuller 4-6 sentence summary and a 2-3 sentence personalizedNote using Kindwise crop notes. Leave recommendation arrays empty."
+            ? ' This scan is HEALTHY: write a fuller 4-6 sentence summary and a 2-3 sentence personalizedNote using Kindwise crop notes. Leave recommendation arrays empty.'
             : ' This scan has a disease: fill recommendations for what the farmer should do.';
 
         $messages = [
@@ -388,7 +389,7 @@ class CropDiagnosisService
 
         Log::warning('Diagnosis domain incomplete or outdated — running DiagnosisDomainSeeder');
         try {
-            (new \Database\Seeders\DiagnosisDomainSeeder)->run();
+            (new DiagnosisDomainSeeder)->run();
         } catch (\Throwable $e) {
             Log::error('DiagnosisDomainSeeder failed', ['error' => $e->getMessage()]);
         }

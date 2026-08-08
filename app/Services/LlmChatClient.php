@@ -237,6 +237,7 @@ class LlmChatClient
 
             if ($role === 'system') {
                 $system .= ($system === '' ? '' : "\n\n").(is_string($content) ? $content : json_encode($content));
+
                 continue;
             }
 

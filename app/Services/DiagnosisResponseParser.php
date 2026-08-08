@@ -250,7 +250,6 @@ class DiagnosisResponseParser
     }
 
     /**
-     * @param  mixed  $value
      * @return list<string>
      */
     private function stringList(mixed $value): array
@@ -269,7 +268,6 @@ class DiagnosisResponseParser
     }
 
     /**
-     * @param  mixed  $value
      * @return list<array{name:string,type:string,usage:string}>
      */
     private function productList(mixed $value): array
@@ -282,6 +280,7 @@ class DiagnosisResponseParser
         foreach ($value as $item) {
             if (is_string($item) && trim($item) !== '') {
                 $products[] = ['name' => trim($item), 'type' => 'other', 'usage' => 'Follow local label directions.'];
+
                 continue;
             }
             if (! is_array($item) || trim((string) ($item['name'] ?? '')) === '') {

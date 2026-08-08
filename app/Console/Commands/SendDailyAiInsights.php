@@ -37,6 +37,7 @@ class SendDailyAiInsights extends Command
                     'user_id' => $user->id,
                     'error' => $e->getMessage(),
                 ]);
+
                 continue;
             }
 
