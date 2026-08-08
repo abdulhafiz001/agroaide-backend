@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\AiAdvisorService;
 use App\Services\NotificationDispatcher;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class SendDailyAiInsights extends Command
 {
@@ -31,7 +32,11 @@ class SendDailyAiInsights extends Command
         foreach ($users as $user) {
             try {
                 $insights = $this->advisorService->dailyInsight($user);
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                Log::warning('Daily AI insight generation failed', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
                 continue;
             }
 

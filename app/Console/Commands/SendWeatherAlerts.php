@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Services\NotificationDispatcher;
 use App\Services\WeatherService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class SendWeatherAlerts extends Command
 {
@@ -35,7 +36,11 @@ class SendWeatherAlerts extends Command
                     (float) $user->farm_latitude,
                     (float) $user->farm_longitude,
                 );
-            } catch (\Throwable) {
+            } catch (\Throwable $e) {
+                Log::warning('Weather alert fetch failed', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage(),
+                ]);
                 continue;
             }
 

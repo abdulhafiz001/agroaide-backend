@@ -13,7 +13,13 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'Laravel'),
+    'name' => env('APP_NAME', 'AgroAide'),
+
+    /*
+    | Public Android APK / Play download link shown on the marketing landing page.
+    | Example: https://agroaide.ahzcode.sbs/downloads/agroaide.apk
+    */
+    'android_apk_url' => env('ANDROID_APK_URL', ''),
 
     /*
     |--------------------------------------------------------------------------

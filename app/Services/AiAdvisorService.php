@@ -96,25 +96,30 @@ class AiAdvisorService
     }
 
     /**
-     * Generate daily insight for a user (cached per user per day).
+     * Generate daily insight for a user (cached per user per day + weather fingerprint).
+     * Regenerates when the calendar day changes or today's rain outlook shifts meaningfully.
      */
     public function dailyInsight(User $user): array
     {
         $user->refresh();
         $lang = $user->preferred_language ?? 'en';
-        $cacheKey = "daily_insight_{$user->id}_{$lang}_".date('Y-m-d');
+        $pulse = $this->buildTodayFarmPulse($user);
+        $day = now()->toDateString();
+        $cacheKey = "daily_insight_{$user->id}_{$lang}_{$day}_{$pulse['fingerprint']}";
 
-        return Cache::remember($cacheKey, 86400, function () use ($user, $lang) {
-            return $this->generateDailyInsight($user, $lang);
+        return Cache::remember($cacheKey, now()->endOfDay(), function () use ($user, $lang, $pulse) {
+            return $this->generateDailyInsight($user, $lang, $pulse);
         });
     }
 
     public static function forgetDailyInsightCache(int $userId): void
     {
+        // Exact keys include a weather fingerprint; wipe known language+day prefixes via cache store tags is unavailable.
+        // Forget stable day keys (legacy + language) so the next request rebuilds with a fresh fingerprint.
+        $day = now()->toDateString();
         foreach (['en', 'ha', 'yo', 'pcm'] as $lang) {
-            Cache::forget("daily_insight_{$userId}_{$lang}_".date('Y-m-d'));
-            // Legacy key from before language was part of the cache key.
-            Cache::forget("daily_insight_{$userId}_".date('Y-m-d'));
+            Cache::forget("daily_insight_{$userId}_{$lang}_".$day);
+            Cache::forget("daily_insight_{$userId}_".$day);
         }
     }
 
@@ -141,39 +146,226 @@ class AiAdvisorService
         return array_slice($suggestions, 0, 4);
     }
 
-    private function generateDailyInsight(User $user, string $lang = 'en'): array
+    /**
+     * @param  array{summary:string,fingerprint:string,rainToday:bool,rainTonight:bool,todayPrecipMm:float,todayRainChance:int,tonightMaxChance:int,condition:string}  $pulse
+     */
+    private function generateDailyInsight(User $user, string $lang, array $pulse): array
     {
         $systemPrompt = $this->buildSystemPrompt($user, $lang);
         $langName = TranslationService::languageName($lang);
+        $crops = is_array($user->crops) ? implode(', ', $user->crops) : 'your crops';
 
         $messages = [
             ['role' => 'system', 'content' => $systemPrompt],
-            ['role' => 'user', 'content' => "Give me 2 short, actionable farming insights for today based on my farm conditions and current weather. Write title and description in {$langName}. Each insight should have a title (max 8 words) and a description (max 30 words). Return ONLY valid JSON array: [{\"title\": \"...\", \"description\": \"...\"}]"],
+            ['role' => 'user', 'content' => <<<PROMPT
+TODAY'S FARM PULSE (must drive the insights — do not ignore):
+{$pulse['summary']}
+
+Give exactly 2 short, actionable farming insights for THIS farmer for TODAY.
+Rules:
+1. At least one insight MUST react to rain / no-rain today or tonight when rain data is present (delay spraying if rain is likely; irrigate if dry; protect harvested produce if overnight rain, etc.).
+2. Tie advice to {$crops} and today's tasks/scans when available.
+3. Write title and description in {$langName}.
+4. Title max 8 words. Description max 35 words.
+5. Return ONLY a valid JSON array: [{"title":"...","description":"..."}]
+PROMPT],
         ];
 
-        $reply = $this->askLlm($messages, ['temperature' => 0.4, 'max_tokens' => 512]);
+        try {
+            $reply = $this->askLlm($messages, ['temperature' => 0.35, 'max_tokens' => 512]);
+            $cleaned = preg_replace('/```json\s*|\s*```/', '', $reply) ?? $reply;
+            $cleaned = trim($cleaned);
+            $parsed = json_decode($cleaned, true);
 
-        $cleaned = preg_replace('/```json\s*|\s*```/', '', $reply);
-        $cleaned = trim($cleaned);
-
-        $parsed = json_decode($cleaned, true);
-
-        if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
-            $insights = [];
-            foreach (array_slice($parsed, 0, 3) as $i => $item) {
-                $insights[] = [
-                    'id' => 'tip-'.($i + 1),
-                    'title' => $item['title'] ?? 'Farm tip',
-                    'description' => $item['description'] ?? 'Check your crops and field conditions today.',
-                ];
+            if (json_last_error() === JSON_ERROR_NONE && is_array($parsed)) {
+                $insights = [];
+                foreach (array_slice($parsed, 0, 3) as $i => $item) {
+                    if (! is_array($item)) {
+                        continue;
+                    }
+                    $insights[] = [
+                        'id' => 'tip-'.($i + 1).'-'.now()->toDateString(),
+                        'title' => $item['title'] ?? 'Farm tip',
+                        'description' => $item['description'] ?? 'Check your crops and field conditions today.',
+                    ];
+                }
+                if ($insights !== []) {
+                    return $insights;
+                }
             }
+        } catch (\Throwable $e) {
+            Log::warning('Daily insight LLM failed; using weather fallback', ['error' => $e->getMessage()]);
+        }
 
-            return $insights;
+        return $this->fallbackDailyInsights($pulse, $crops);
+    }
+
+    /**
+     * Compact today/tonight weather + farm signals for dashboard insights.
+     *
+     * @return array{summary:string,fingerprint:string,rainToday:bool,rainTonight:bool,todayPrecipMm:float,todayRainChance:int,tonightMaxChance:int,condition:string}
+     */
+    private function buildTodayFarmPulse(User $user): array
+    {
+        $lines = [];
+        $todayPrecipMm = 0.0;
+        $todayRainChance = 0;
+        $tonightMaxChance = 0;
+        $condition = 'unknown';
+        $rainToday = false;
+        $rainTonight = false;
+
+        if ($user->farm_latitude && $user->farm_longitude) {
+            try {
+                $weather = $this->weatherService->getWeather(
+                    (float) $user->farm_latitude,
+                    (float) $user->farm_longitude,
+                );
+                $current = $weather['current'] ?? [];
+                $condition = (string) ($current['condition'] ?? 'unknown');
+                $temp = $current['temperature'] ?? 'n/a';
+                $humidity = $current['humidity'] ?? 'n/a';
+                $lines[] = "Now: {$temp}°C, {$condition}, humidity {$humidity}%.";
+
+                $today = collect($weather['forecast'] ?? [])->firstWhere('day', 'Today')
+                    ?? collect($weather['forecast'] ?? [])->first();
+                if (is_array($today)) {
+                    $todayPrecipMm = (float) ($today['precipitation'] ?? 0);
+                    $todayRainChance = (int) ($today['precipitationProbability'] ?? 0);
+                    $rainToday = $todayPrecipMm >= 0.5 || $todayRainChance >= 40;
+                    $lines[] = sprintf(
+                        'Today: %s, high %s° / low %s°, rain %s mm (~%s%% chance).',
+                        $today['condition'] ?? $condition,
+                        $today['high'] ?? 'n/a',
+                        $today['low'] ?? 'n/a',
+                        $todayPrecipMm,
+                        $todayRainChance,
+                    );
+                }
+
+                $hour = (int) now()->format('G');
+                foreach ($weather['hourly'] ?? [] as $slot) {
+                    $time = (string) ($slot['time'] ?? '');
+                    if ($time === '' || ! str_contains($time, 'T')) {
+                        continue;
+                    }
+                    $slotHour = (int) substr($time, 11, 2);
+                    // Tonight window: from max(current hour, 18:00) through 05:00 next morning (within next 24h list).
+                    $isEvening = $slotHour >= max($hour, 18) || $slotHour <= 5;
+                    if (! $isEvening) {
+                        continue;
+                    }
+                    $chance = (int) ($slot['precipitationProbability'] ?? 0);
+                    $tonightMaxChance = max($tonightMaxChance, $chance);
+                }
+                $rainTonight = $tonightMaxChance >= 45;
+                $lines[] = $rainTonight
+                    ? "Tonight: rain likely (peak chance ~{$tonightMaxChance}%). Avoid late spraying; cover harvested produce."
+                    : "Tonight: mostly dry (peak rain chance ~{$tonightMaxChance}%).";
+
+                foreach (array_slice($weather['soilHealth'] ?? [], 0, 2) as $soil) {
+                    $lines[] = ($soil['label'] ?? 'Soil').': '.($soil['value'] ?? 'n/a').($soil['unit'] ?? '');
+                }
+            } catch (\Throwable $e) {
+                $lines[] = 'Weather temporarily unavailable.';
+                Log::warning('Today farm pulse weather failed: '.$e->getMessage());
+            }
+        } else {
+            $lines[] = 'No farm GPS — set location in Settings for rain-aware tips.';
+        }
+
+        $crops = is_array($user->crops) ? implode(', ', $user->crops) : '';
+        if ($crops !== '') {
+            $lines[] = "Crops: {$crops}.";
+        }
+
+        $pendingTasks = CalendarTask::where('user_id', $user->id)
+            ->whereDate('scheduled_date', now()->toDateString())
+            ->where('completed', false)
+            ->orderBy('period')
+            ->limit(3)
+            ->pluck('title')
+            ->all();
+        if ($pendingTasks !== []) {
+            $lines[] = 'Pending tasks today: '.implode('; ', $pendingTasks).'.';
+        }
+
+        $recentScan = FarmImageAnalysis::where('user_id', $user->id)
+            ->where('processing_state', 'completed')
+            ->where('created_at', '>=', now()->subDays(3))
+            ->latest('id')
+            ->first();
+        if ($recentScan) {
+            $disease = $recentScan->disease_name ?: 'no disease flagged';
+            $lines[] = "Recent scan ({$recentScan->condition}): {$disease}.";
+        }
+
+        $fingerprint = substr(hash('sha256', implode('|', [
+            now()->toDateString(),
+            $condition,
+            (string) $todayRainChance,
+            (string) round($todayPrecipMm, 1),
+            (string) $tonightMaxChance,
+            $rainToday ? '1' : '0',
+            $rainTonight ? '1' : '0',
+        ])), 0, 12);
+
+        return [
+            'summary' => implode("\n", $lines),
+            'fingerprint' => $fingerprint,
+            'rainToday' => $rainToday,
+            'rainTonight' => $rainTonight,
+            'todayPrecipMm' => $todayPrecipMm,
+            'todayRainChance' => $todayRainChance,
+            'tonightMaxChance' => $tonightMaxChance,
+            'condition' => $condition,
+        ];
+    }
+
+    /**
+     * @param  array{rainToday:bool,rainTonight:bool,todayPrecipMm:float,todayRainChance:int,tonightMaxChance:int,condition:string}  $pulse
+     * @return array<int, array{id:string,title:string,description:string}>
+     */
+    private function fallbackDailyInsights(array $pulse, string $crops): array
+    {
+        $day = now()->toDateString();
+        $cropLabel = $crops !== '' ? $crops : 'your crops';
+
+        if ($pulse['rainTonight'] || $pulse['rainToday']) {
+            return [
+                [
+                    'id' => "tip-1-{$day}",
+                    'title' => 'Rain coming — plan around it',
+                    'description' => sprintf(
+                        'Rain chance ~%s%% today / ~%s%% tonight. Delay spraying %s; finish drainage checks before dusk.',
+                        $pulse['todayRainChance'],
+                        $pulse['tonightMaxChance'],
+                        $cropLabel,
+                    ),
+                ],
+                [
+                    'id' => "tip-2-{$day}",
+                    'title' => 'Protect harvested produce',
+                    'description' => 'Cover bags and tools overnight. Walk fields after rain for lodging or new leaf spots.',
+                ],
+            ];
         }
 
         return [
-            ['id' => 'tip-1', 'title' => 'Monitor soil moisture', 'description' => 'Check moisture levels in the morning for optimal irrigation timing.'],
-            ['id' => 'tip-2', 'title' => 'Inspect for pests', 'description' => 'Early morning inspection helps catch pest infestations before they spread.'],
+            [
+                'id' => "tip-1-{$day}",
+                'title' => 'Dry window for field work',
+                'description' => sprintf(
+                    'Little rain expected (today ~%s%%). Good day to weed, spray if needed, or irrigate %s early morning.',
+                    $pulse['todayRainChance'],
+                    $cropLabel,
+                ),
+            ],
+            [
+                'id' => "tip-2-{$day}",
+                'title' => 'Scout for pests at dawn',
+                'description' => 'Dry mornings are ideal for leaf checks. Catch early damage before it spreads across the plot.',
+            ],
         ];
     }
 

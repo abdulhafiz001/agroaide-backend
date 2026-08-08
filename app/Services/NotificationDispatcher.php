@@ -50,12 +50,20 @@ class NotificationDispatcher
         ]);
 
         if ($sendPush) {
-            $this->fcm->sendToUser(
+            $pushed = $this->fcm->sendToUser(
                 $user,
                 $title,
                 $message,
                 array_merge($data, ['type' => $type, 'notificationId' => (string) $notification->id]),
             );
+            if (! $pushed && ! empty($user->push_token)) {
+                // In-app row still exists; FcmPushService already logged the provider error.
+                logger()->notice('In-app notification saved but FCM push did not succeed', [
+                    'user_id' => $user->id,
+                    'type' => $type,
+                    'notification_id' => $notification->id,
+                ]);
+            }
         }
 
         return $notification;
