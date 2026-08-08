@@ -8,484 +8,667 @@
     <link rel="icon" href="{{ asset('images/agroaideLogo.png') }}" type="image/png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Cabinet+Grotesk:wght@700;800&display=swap" rel="stylesheet">
+    
     <style>
         :root {
-            --ink: #142018;
-            --muted: #3d5244;
-            --leaf: #2f7a3e;
-            --leaf-deep: #1f5a2c;
-            --sun: #e8b84a;
-            --cream: #f3f7f1;
-            --panel: rgba(255, 255, 255, 0.9);
-            --line: rgba(20, 32, 24, 0.12);
-            --shadow: 0 24px 60px rgba(20, 40, 28, 0.18);
-            --font-display: "Fraunces", Georgia, serif;
-            --font-body: "Source Sans 3", system-ui, sans-serif;
+            --bg-dark: #09130c;
+            --bg-card: #112216;
+            --primary: #10b981;
+            --primary-hover: #059669;
+            --accent-gold: #f59e0b;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --border-glow: rgba(16, 185, 129, 0.15);
+            --glass-bg: rgba(17, 34, 22, 0.65);
+            --font-head: 'Plus Jakarta Sans', sans-serif;
+            --font-body: 'Plus Jakarta Sans', sans-serif;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html { scroll-behavior: smooth; }
         body {
             font-family: var(--font-body);
-            color: var(--ink);
-            background: var(--cream);
-            line-height: 1.55;
+            color: var(--text-main);
+            background-color: var(--bg-dark);
+            line-height: 1.6;
+            overflow-x: hidden;
         }
-        img { max-width: 100%; display: block; }
-        a { color: inherit; text-decoration: none; }
 
-        .hero {
-            min-height: 100vh;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            color: #f7fff8;
-            overflow: hidden;
-            background:
-                linear-gradient(115deg, rgba(12, 36, 20, 0.88) 0%, rgba(20, 60, 32, 0.72) 42%, rgba(40, 90, 48, 0.55) 100%),
-                radial-gradient(circle at 80% 20%, rgba(232, 184, 74, 0.28), transparent 40%),
-                url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E"),
-                linear-gradient(180deg, #163820 0%, #2a6b38 55%, #1a4024 100%);
-        }
-        .hero::after {
-            content: "";
+        a { color: inherit; text-decoration: none; }
+        img { max-width: 100%; display: block; }
+
+        /* --- Ambient Glow Backgrounds --- */
+        .glow-orb {
             position: absolute;
-            inset: auto 0 0 0;
-            height: 140px;
-            background: linear-gradient(to top, var(--cream), transparent);
+            border-radius: 50%;
+            filter: blur(120px);
             pointer-events: none;
+            z-index: 0;
+        }
+        .glow-1 {
+            width: 400px;
+            height: 400px;
+            background: rgba(16, 185, 129, 0.18);
+            top: -100px;
+            right: -100px;
+        }
+        .glow-2 {
+            width: 350px;
+            height: 350px;
+            background: rgba(245, 158, 11, 0.12);
+            top: 40%;
+            left: -100px;
+        }
+
+        /* --- Header / Nav --- */
+        header {
+            position: relative;
+            background: radial-gradient(100% 100% at 50% 0%, #152e1e 0%, #09130c 100%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 5rem;
         }
 
         .nav {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 1.25rem 6vw;
+            padding: 1.5rem 6vw;
+            max-width: 1280px;
+            margin: 0 auto;
             position: relative;
-            z-index: 2;
-            animation: rise 0.8s ease both;
+            z-index: 10;
         }
+
         .brand {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
-            font-family: var(--font-display);
-            font-size: 1.55rem;
-            font-weight: 700;
+            gap: 0.85rem;
+            font-size: 1.4rem;
+            font-weight: 800;
             letter-spacing: -0.02em;
         }
         .brand img {
-            width: 48px;
-            height: 48px;
+            width: 42px;
+            height: 42px;
             border-radius: 12px;
-            background: rgba(255,255,255,0.12);
-            object-fit: contain;
-        }
-        .nav a.ghost {
-            color: #e8f5ea;
-            font-weight: 600;
-            opacity: 0.9;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
 
-        .hero-main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            padding: 2rem 6vw 5rem;
-            max-width: 920px;
+        .nav-link {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            transition: color 0.2s;
+        }
+        .nav-link:hover { color: var(--primary); }
+
+        /* --- Hero Section --- */
+        .hero {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 4rem 6vw 2rem;
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 4rem;
+            align-items: center;
             position: relative;
             z-index: 2;
         }
+
+        .hero-content {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .badge-pill {
+            align-self: flex-start;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 1rem;
+            border-radius: 99px;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+            color: var(--primary);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
         .hero h1 {
-            font-family: var(--font-display);
-            font-size: clamp(3rem, 9vw, 5.6rem);
-            line-height: 0.95;
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            line-height: 1.1;
+            font-weight: 800;
             letter-spacing: -0.03em;
-            margin-bottom: 1rem;
-            animation: rise 0.9s 0.1s ease both;
+            background: linear-gradient(180deg, #ffffff 0%, #d1d5db 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
-        .hero .lede {
-            font-size: clamp(1.05rem, 2.4vw, 1.3rem);
-            max-width: 36rem;
-            color: #dceee0;
-            margin-bottom: 1.75rem;
-            animation: rise 0.9s 0.2s ease both;
+
+        .hero p.lede {
+            font-size: 1.15rem;
+            color: var(--text-muted);
+            max-width: 540px;
         }
-        .cta-row {
+
+        .cta-group {
             display: flex;
             flex-wrap: wrap;
-            gap: 0.85rem;
+            gap: 1rem;
             align-items: center;
-            animation: rise 0.9s 0.3s ease both;
+            margin-top: 0.5rem;
         }
+
         .btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.5rem;
-            min-height: 52px;
-            padding: 0.85rem 1.35rem;
-            border-radius: 14px;
+            gap: 0.6rem;
+            padding: 0.9rem 1.8rem;
+            border-radius: 12px;
             font-weight: 700;
-            border: none;
+            font-size: 0.95rem;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
-            transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
         }
-        .btn:hover { transform: translateY(-2px); }
+
         .btn-primary {
-            background: var(--sun);
-            color: #1d2a14;
-            box-shadow: 0 12px 28px rgba(232, 184, 74, 0.35);
+            background: var(--primary);
+            color: #042010;
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.35);
         }
-        .btn-primary:hover { background: #f0c45c; }
-        .btn-primary.is-disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-            transform: none;
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(16, 185, 129, 0.45);
         }
+
         .btn-secondary {
-            background: rgba(255,255,255,0.1);
-            color: #fff;
-            border: 1px solid rgba(255,255,255,0.28);
-            backdrop-filter: blur(6px);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(10px);
         }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .btn.is-disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
         .ios-note {
-            width: 100%;
-            font-size: 0.92rem;
-            color: #c5dfca;
-            animation: rise 0.9s 0.4s ease both;
-        }
-
-        section {
-            padding: 4.5rem 6vw;
-        }
-        .section-title {
-            font-family: var(--font-display);
-            font-size: clamp(1.8rem, 4vw, 2.6rem);
-            letter-spacing: -0.02em;
-            margin-bottom: 0.6rem;
-        }
-        .section-sub {
-            color: var(--muted);
-            max-width: 40rem;
-            margin-bottom: 2rem;
-        }
-
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 1.25rem;
-        }
-        .feature {
-            background: #fff;
-            border: 1px solid var(--line);
-            border-radius: 18px;
-            padding: 1.35rem 1.3rem 1.45rem;
-            box-shadow: 0 10px 30px rgba(20, 40, 28, 0.05);
-            transition: transform 0.25s ease;
-        }
-        .feature:hover { transform: translateY(-4px); }
-        .feature h3 {
-            font-family: var(--font-display);
-            font-size: 1.25rem;
-            margin-bottom: 0.45rem;
-            color: var(--leaf-deep);
-        }
-        .feature p { color: var(--muted); font-size: 0.98rem; }
-        .feature .tag {
-            display: inline-block;
-            font-size: 0.75rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-            color: var(--leaf);
-            margin-bottom: 0.55rem;
-        }
-
-        .process {
-            background: linear-gradient(180deg, #e8f1e6 0%, var(--cream) 100%);
-        }
-        .steps {
-            display: grid;
-            gap: 1rem;
-            counter-reset: step;
-        }
-        .step {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 1rem;
-            align-items: start;
-            background: var(--panel);
-            border: 1px solid var(--line);
-            border-radius: 16px;
-            padding: 1.15rem 1.25rem;
-        }
-        .step::before {
-            counter-increment: step;
-            content: counter(step);
-            width: 2.2rem;
-            height: 2.2rem;
-            border-radius: 999px;
-            background: var(--leaf);
-            color: #fff;
-            display: grid;
-            place-items: center;
-            font-weight: 700;
-        }
-        .step h3 {
-            font-family: var(--font-display);
-            font-size: 1.15rem;
-            margin-bottom: 0.25rem;
-        }
-        .step p { color: var(--muted); }
-
-        .market {
-            display: grid;
-            grid-template-columns: 1.1fr 0.9fr;
-            gap: 2rem;
-            align-items: center;
-        }
-        .market-panel {
-            background: #163820;
-            color: #eaf6ec;
-            border-radius: 24px;
-            padding: 2rem;
-            box-shadow: var(--shadow);
-            min-height: 280px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
             display: flex;
-            flex-direction: column;
-            justify-content: flex-end;
-            background-image:
-                radial-gradient(circle at 20% 20%, rgba(232,184,74,0.25), transparent 35%),
-                linear-gradient(145deg, #163820, #245c32 60%, #1a4024);
-        }
-        .market-panel strong {
-            font-family: var(--font-display);
-            font-size: 2rem;
-            display: block;
-            margin-bottom: 0.5rem;
+            align-items: center;
+            gap: 0.4rem;
         }
 
-        .download-band {
-            background: #142018;
-            color: #f2faf3;
+        /* Mock Phone / Visual Element */
+        .hero-visual {
+            position: relative;
+            display: flex;
+            justify-content: center;
+        }
+        .hero-card {
+            width: 100%;
+            max-width: 360px;
+            background: var(--glass-bg);
+            border: 1px solid var(--border-glow);
+            border-radius: 24px;
+            padding: 1.5rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+        .hero-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        /* --- Sections Layout --- */
+        section {
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 6rem 6vw;
+            position: relative;
+            z-index: 2;
+        }
+
+        .section-header {
+            margin-bottom: 3.5rem;
             text-align: center;
         }
-        .download-band .brand-lockup {
+        .section-title {
+            font-size: clamp(2rem, 3.5vw, 2.75rem);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.75rem;
+        }
+        .section-sub {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            max-width: 580px;
+            margin: 0 auto;
+        }
+
+        /* --- Grid Features --- */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 20px;
+            padding: 2rem 1.75rem;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .feature-card:hover {
+            transform: translateY(-5px);
+            border-color: var(--border-glow);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.3);
+        }
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
+        }
+        .feature-card h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .feature-card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* --- How It Works / Steps --- */
+        .steps-wrapper {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            position: relative;
+        }
+
+        .step-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 2rem 1.5rem;
+            position: relative;
+        }
+        .step-number {
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: rgba(16, 185, 129, 0.2);
+            line-height: 1;
+            margin-bottom: 1rem;
+        }
+        .step-card h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+        .step-card p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* --- Market Feature Highlight --- */
+        .market-banner {
+            background: linear-gradient(135deg, rgba(17, 34, 22, 0.8) 0%, rgba(9, 19, 12, 0.9) 100%);
+            border: 1px solid var(--border-glow);
+            border-radius: 28px;
+            padding: 3.5rem 3vw;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3rem;
+            align-items: center;
+        }
+        .market-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-top: 1.5rem;
+        }
+        .market-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+        .market-list li::before {
+            content: "✓";
+            color: var(--primary);
+            font-weight: bold;
+        }
+
+        .market-card-preview {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+        }
+
+        /* --- CTA Download Band --- */
+        .download-wrapper {
+            text-align: center;
+            background: radial-gradient(circle at center, rgba(16, 185, 129, 0.12) 0%, transparent 70%);
+            padding: 5rem 2rem;
+            border-radius: 32px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            margin-bottom: 4rem;
+        }
+        .download-brand {
             display: inline-flex;
             align-items: center;
             gap: 0.75rem;
-            margin-bottom: 1rem;
-            font-family: var(--font-display);
-            font-size: 1.6rem;
-            font-weight: 700;
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-bottom: 1.5rem;
         }
-        .download-band img {
-            width: 56px;
-            height: 56px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.08);
-        }
-        .download-band p {
-            max-width: 34rem;
-            margin: 0 auto 1.4rem;
-            color: #c9decf;
+        .download-brand img {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
         }
 
+        /* --- Footer --- */
         footer {
-            padding: 2rem 6vw 2.5rem;
-            color: var(--muted);
-            font-size: 0.92rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 2.5rem 6vw;
+            max-width: 1280px;
+            margin: 0 auto;
             display: flex;
             flex-wrap: wrap;
-            gap: 1rem;
             justify-content: space-between;
-            border-top: 1px solid var(--line);
-            background: #fff;
+            align-items: center;
+            gap: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
         }
-        footer a { color: var(--leaf-deep); font-weight: 600; }
-
-        @keyframes rise {
-            from { opacity: 0; transform: translateY(18px); }
-            to { opacity: 1; transform: translateY(0); }
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+        .footer-links a:hover {
+            color: var(--primary);
         }
 
-        @media (max-width: 800px) {
-            .market { grid-template-columns: 1fr; }
-            .nav { padding-inline: 1.25rem; }
-            .hero-main, section, footer { padding-inline: 1.25rem; }
+        /* Responsive Breakpoints */
+        @media (max-width: 968px) {
+            .hero {
+                grid-template-columns: 1fr;
+                text-align: center;
+                gap: 2.5rem;
+            }
+            .badge-pill, .hero p.lede {
+                margin-left: auto;
+                margin-right: auto;
+            }
+            .cta-group {
+                justify-content: center;
+            }
+            .market-banner {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
+
     @php
         $apkUrl = trim((string) config('app.android_apk_url'));
         $hasApk = $apkUrl !== '';
     @endphp
 
-    <header class="hero">
+    <div class="glow-orb glow-1"></div>
+    <div class="glow-orb glow-2"></div>
+
+    <!-- Header Section -->
+    <header>
         <nav class="nav">
             <div class="brand">
                 <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide logo">
                 <span>AgroAide</span>
             </div>
-            <a class="ghost" href="#features">Features</a>
+            <a class="nav-link" href="#features">Features</a>
         </nav>
 
-        <div class="hero-main">
-            <h1>AgroAide</h1>
-            <p class="lede">
-                Crop health scans, weather-aware advice, market prices, and nearby disease warnings —
-                built for Nigerian smallholders who need clear next steps on the phone.
-            </p>
-            <div class="cta-row">
-                @if ($hasApk)
-                    <a class="btn btn-primary" href="{{ $apkUrl }}" id="download-android">
-                        Download for Android
-                    </a>
-                @else
-                    <span class="btn btn-primary is-disabled" title="Set ANDROID_APK_URL on the server">
-                        Download for Android
-                    </span>
-                @endif
-                <a class="btn btn-secondary" href="#how-it-works">See how it works</a>
+        <div class="hero">
+            <div class="hero-content">
+                <div class="badge-pill">
+                    <span>🌱</span> Built for Nigerian Smallholders
+                </div>
+                <h1>Smart farming tools right on your phone</h1>
+                <p class="lede">
+                    Crop health scans, weather-aware advice, market prices, and nearby disease warnings — helping you manage your farm with confidence.
+                </p>
+
+                <div class="cta-group">
+                    @if ($hasApk)
+                        <a class="btn btn-primary" href="{{ $apkUrl }}" id="download-android">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.52 0c-.39 0-.74.19-.96.49l-1.92 2.58a10.05 10.05 0 0 0-5.28 0L7.44.49A1.2 1.2 0 0 0 6.48 0c-.8 0-1.34.78-1.02 1.51l1.32 2.97C3.15 6.27 1 9.87 1 14h22c0-4.13-2.15-7.73-5.78-9.52l1.32-2.97C18.86.78 18.32 0 17.52 0zM7 10.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zm10 0c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM1 15v6c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-6H1zm20 0v6c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-6h-3z"/></svg>
+                            Download for Android
+                        </a>
+                    @else
+                        <span class="btn btn-primary is-disabled" title="Set ANDROID_APK_URL on the server">
+                            Download for Android
+                        </span>
+                    @endif
+                    <a class="btn btn-secondary" href="#how-it-works">See how it works</a>
+                </div>
+
+                <p class="ios-note">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Android only — iOS paused due to Apple developer payment limits.
+                </p>
             </div>
-            <p class="ios-note">Android only for now — iOS is paused because of Apple’s developer payment requirements.</p>
+
+            <!-- UI Mockup Graphic -->
+            <div class="hero-visual">
+                <div class="hero-card">
+                    <div class="hero-card-header">
+                        <span style="font-size: 0.85rem; font-weight:700; color:var(--text-muted)">DAILY DASHBOARD</span>
+                        <span style="font-size: 0.75rem; color: var(--primary); background:rgba(16,185,129,0.15); padding:2px 8px; border-radius:10px;">Live Insights</span>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <h4 style="font-size: 1.1rem; font-weight:700;">Rainfall Expected Today 🌦️</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top:0.2rem;">Hold off on applying fertilizer until tomorrow afternoon to avoid runoff.</p>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.03); border-radius: 12px; padding: 0.85rem; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="display:block; font-size:0.75rem; color:var(--text-muted)">Cassava Market (Kano)</span>
+                            <span style="font-weight:700; color:#fff;">₦180,000 / ton</span>
+                        </div>
+                        <span style="color:var(--primary); font-size:0.85rem; font-weight:700;">+3.2%</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </header>
 
+    <!-- Features Section -->
     <section id="features">
-        <h2 class="section-title">Everything in the app</h2>
-        <p class="section-sub">Real tools farmers use daily — from the first scan to market timing and outbreak alerts.</p>
-        <div class="features">
-            <article class="feature">
-                <div class="tag">Scan</div>
-                <h3>Crop disease scanning</h3>
-                <p>Photograph a leaf or plant. Kindwise research ID plus a clear farmer write-up with what to do next.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Advisor</div>
-                <h3>AI farm advisor</h3>
-                <p>Ask in English, Hausa, Yoruba, or Pidgin — type or speak. Advice uses your crops, fields, and weather.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Weather</div>
-                <h3>Local weather & soil</h3>
-                <p>7-day forecast, rain chances, and soil moisture cues tied to your farm GPS — not a random city.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Calendar</div>
-                <h3>Farming calendar</h3>
-                <p>Tasks, planting reminders, and crop watches so today’s work stays visible on one screen.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Market</div>
-                <h3>Crop market intel</h3>
-                <p>Crowd-verified prices from Market Eye for the crops you grow, so you sell with better timing.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Community</div>
-                <h3>Disease outbreak map</h3>
-                <p>When nearby farmers report the same disease on the same crop, you get a warning or outbreak alert.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Fields</div>
-                <h3>Fields, journal & money</h3>
-                <p>Walk boundaries, log observations, track expenses/income, and estimate seed or fertilizer needs.</p>
-            </article>
-            <article class="feature">
-                <div class="tag">Alerts</div>
-                <h3>Push notifications</h3>
-                <p>Severe weather, task reminders, daily AI tips, and disease alerts delivered to your Android phone.</p>
-            </article>
+        <div class="section-header">
+            <h2 class="section-title">Everything Built for Your Field</h2>
+            <p class="section-sub">Essential tools designed for practical, daily decision-making in agriculture.</p>
         </div>
-    </section>
 
-    <section class="process" id="how-it-works">
-        <h2 class="section-title">How farmers use AgroAide</h2>
-        <p class="section-sub">A simple loop from setup to action — designed for low friction in the field.</p>
-        <div class="steps">
-            <div class="step">
-                <div>
-                    <h3>Create your farm profile</h3>
-                    <p>Add crops as cards, set soil and irrigation, then pin your farm with GPS or LocationIQ search.</p>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                 </div>
+                <h3>Crop Disease Scanning</h3>
+                <p>Upload a photo of damaged leaves. Get instant diagnosis alongside treatment steps tailored for local application.</p>
             </div>
-            <div class="step">
-                <div>
-                    <h3>Scan when plants look wrong</h3>
-                    <p>Upload a photo. Get condition, disease (if any), and practical next steps — up to four scans a day.</p>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
                 </div>
+                <h3>Multilingual AI Advisor</h3>
+                <p>Chat or speak in English, Hausa, Yoruba, or Pidgin. Get contextual advice based on your crops, land, and climate.</p>
             </div>
-            <div class="step">
-                <div>
-                    <h3>Check today’s insight & weather</h3>
-                    <p>Dashboard tips refresh each day from live rain outlook, soil signals, tasks, and recent scans.</p>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 001.09-9.88A5.5 5.5 0 008.06 6.02A4.5 4.5 0 003 15z"></path></svg>
                 </div>
+                <h3>Localized Weather & Soil</h3>
+                <p>7-day forecasts and soil moisture indicators calibrated directly to your farm’s exact GPS positioning.</p>
             </div>
-            <div class="step">
-                <div>
-                    <h3>Ask the advisor or watch the market</h3>
-                    <p>Chat for treatment or planting questions. Open market prices before you harvest or haul to market.</p>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                 </div>
+                <h3>Farming Calendar</h3>
+                <p>Stay updated on key tasks, planting timelines, and maintenance routines with simple visual tracking.</p>
             </div>
-            <div class="step">
-                <div>
-                    <h3>Stay ahead of outbreaks</h3>
-                    <p>If enough nearby growers of your crop report the same disease, AgroAide warns you early.</p>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
                 </div>
+                <h3>Crop Market Intel</h3>
+                <p>Track crowd-verified pricing data from Market Eye so you pick the optimal time and venue to sell crops.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                </div>
+                <h3>Outbreak Alerts</h3>
+                <p>Receive immediate area-wide push notifications whenever neighboring farms report spreading crop diseases.</p>
             </div>
         </div>
     </section>
 
+    <!-- How It Works Section -->
+    <section id="how-it-works">
+        <div class="section-header">
+            <h2 class="section-title">Simple Steps to Better Yields</h2>
+            <p class="section-sub">Designed for straightforward usability out in the field.</p>
+        </div>
+
+        <div class="steps-wrapper">
+            <div class="step-card">
+                <div class="step-number">01</div>
+                <h3>Set Up Farm Profile</h3>
+                <p>Select your primary crops, outline soil conditions, and pin your field using integrated location features.</p>
+            </div>
+
+            <div class="step-card">
+                <div class="step-number">02</div>
+                <h3>Scan Crop Issues</h3>
+                <p>Capture leaves or stems showing distress to immediately receive verified identification and treatment steps.</p>
+            </div>
+
+            <div class="step-card">
+                <div class="step-number">03</div>
+                <h3>Review Daily Guidance</h3>
+                <p>Check customized dashboard updates that cross-reference incoming weather with your crop calendar.</p>
+            </div>
+
+            <div class="step-card">
+                <div class="step-number">04</div>
+                <h3>Time the Market</h3>
+                <p>Consult local crop prices and use voice chat queries before committing to sale or logistics.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Market Highlights -->
     <section>
-        <div class="market">
+        <div class="market-banner">
             <div>
-                <h2 class="section-title">Crop market, not guesswork</h2>
-                <p class="section-sub">
-                    AgroAide pulls crowd-verified market intel for your crops so you can compare local price signals
-                    before you sell. Pair it with weather and calendar tasks to plan harvest and transport days.
+                <h2 class="section-title" style="text-align: left;">Smarter Market Timing</h2>
+                <p style="color: var(--text-muted); font-size: 1.05rem;">
+                    Eliminate guesswork during harvest season. AgroAide compiles real market values for your configured crops so you maximize your returns.
                 </p>
-                <ul style="color: var(--muted); padding-left: 1.1rem; display: grid; gap: 0.55rem;">
-                    <li>Prices matched to the crops on your profile</li>
-                    <li>History trends when available from Market Eye</li>
-                    <li>Works alongside field finance tracking in the app</li>
+                <ul class="market-list">
+                    <li>Matched automatically with your registered crops</li>
+                    <li>Historical pricing trends via Market Eye</li>
+                    <li>Integrated with expense & income logs</li>
                 </ul>
             </div>
-            <div class="market-panel">
-                <strong>Know when to sell</strong>
-                <p>Open Market in the app after you set crops — then use daily weather and advisor tips to time the trip.</p>
+
+            <div class="market-card-preview">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                    <div>
+                        <span style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Market Insight</span>
+                        <h4 style="font-size: 1.25rem; font-weight: 700;">Optimal Selling Window</h4>
+                    </div>
+                    <span style="color: var(--accent-gold); font-size: 1.5rem;">📈</span>
+                </div>
+                <p style="font-size: 0.95rem; color: var(--text-muted); line-height: 1.5;">
+                    Current demand trends suggest holding Maize yields for 4 days due to predicted price bumps in regional distribution centers.
+                </p>
             </div>
         </div>
     </section>
 
-    <section class="download-band" id="download">
-        <div class="brand-lockup">
-            <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide logo">
-            <span>AgroAide</span>
+    <!-- Download CTA Band -->
+    <section id="download">
+        <div class="download-wrapper">
+            <div class="download-brand">
+                <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide logo">
+                <span>AgroAide</span>
+            </div>
+            <h2 class="section-title">Get Started Today</h2>
+            <p class="section-sub" style="margin-bottom: 2rem;">
+                Download the app for Android to manage crops, inspect health, and monitor market updates.
+            </p>
+
+            @if ($hasApk)
+                <a class="btn btn-primary" href="{{ $apkUrl }}">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.52 0c-.39 0-.74.19-.96.49l-1.92 2.58a10.05 10.05 0 0 0-5.28 0L7.44.49A1.2 1.2 0 0 0 6.48 0c-.8 0-1.34.78-1.02 1.51l1.32 2.97C3.15 6.27 1 9.87 1 14h22c0-4.13-2.15-7.73-5.78-9.52l1.32-2.97C18.86.78 18.32 0 17.52 0zM7 10.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zm10 0c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5-1.5zM1 15v6c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-6H1zm20 0v6c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-6h-3z"/></svg>
+                    Download APK Directly
+                </a>
+            @else
+                <span class="btn btn-primary is-disabled">Download for Android</span>
+                <p style="margin-top: 1rem; font-size: 0.85rem; color: var(--text-muted);">
+                    Download link will become active as soon as configured.
+                </p>
+            @endif
         </div>
-        <h2 class="section-title" style="color:#fff;">Get the Android app</h2>
-        <p>
-            Install AgroAide on your phone, create an account, and start with a farm location + your primary crops.
-            iOS is not available yet due to Apple developer payment limits.
-        </p>
-        @if ($hasApk)
-            <a class="btn btn-primary" href="{{ $apkUrl }}">Download for Android</a>
-        @else
-            <span class="btn btn-primary is-disabled">Download for Android</span>
-            <p style="margin-top:0.85rem;font-size:0.9rem;">Download link will appear here once the APK URL is configured.</p>
-        @endif
     </section>
 
+    <!-- Footer -->
     <footer>
-        <div>© {{ date('Y') }} AgroAide</div>
-        <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <div>© {{ date('Y') }} AgroAide. All rights reserved.</div>
+        <div class="footer-links">
             <a href="{{ url('/legal/terms') }}">Terms</a>
             <a href="{{ url('/legal/privacy') }}">Privacy</a>
-            <a href="{{ url('/api/health') }}">API status</a>
+            <a href="{{ url('/api/health') }}">API Status</a>
         </div>
     </footer>
+
 </body>
 </html>
