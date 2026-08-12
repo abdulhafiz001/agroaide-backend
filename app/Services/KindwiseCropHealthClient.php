@@ -175,10 +175,20 @@ class KindwiseCropHealthClient
 
         $name = strtolower((string) ($disease['name'] ?? ''));
         $type = strtolower((string) data_get($disease, 'details.type', data_get($disease, 'type', '')));
+        $probability = (float) ($disease['probability'] ?? 0);
 
-        return str_contains($name, 'healthy')
+        if (str_contains($name, 'healthy')
             || str_contains($name, 'no disease')
             || $type === 'healthy'
-            || ((float) ($disease['probability'] ?? 0) < 0.15 && str_contains($name, 'abiotic'));
+            || ($probability < 0.15 && str_contains($name, 'abiotic'))) {
+            return true;
+        }
+
+        // Weak disease guesses on otherwise leafy photos should not force "diseased".
+        if ($probability < 0.40) {
+            return true;
+        }
+
+        return false;
     }
 }

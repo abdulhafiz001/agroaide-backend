@@ -20,6 +20,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class FarmController extends Controller
 {
@@ -293,16 +294,96 @@ class FarmController extends Controller
 
         return response()->json([
             'message' => 'Planting date saved. Harvest estimate will be ready in a few hours.',
-            'field' => [
-                'id' => (string) $field->id,
-                'name' => $field->name,
-                'crop' => $field->crop,
-                'plantedAt' => $field->planted_at?->toIso8601String(),
-                'harvestStartDate' => $field->harvest_start_date?->toDateString(),
-                'harvestEndDate' => $field->harvest_end_date?->toDateString(),
-                'daysSincePlanting' => $field->days_since_planting,
-            ],
+            'field' => $this->fieldHarvestPayload($field),
         ]);
+    }
+
+    public function markHarvested(Request $request, int $fieldId): JsonResponse
+    {
+        $validated = $request->validate([
+            'harvestedAt' => ['required', 'date', 'before_or_equal:today'],
+            'yieldNote' => ['nullable', 'string', 'max:255'],
+            'plannedNextCrop' => ['nullable', 'string', 'max:100'],
+            'plannedPlantAt' => ['nullable', 'date', 'after_or_equal:today', 'required_with:plannedNextCrop'],
+        ]);
+
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        if (! $field->planted_at) {
+            throw ValidationException::withMessages([
+                'harvestedAt' => ['Set a planting date before marking harvest.'],
+            ]);
+        }
+        if ($field->harvested_at) {
+            throw ValidationException::withMessages([
+                'harvestedAt' => ['This field is already marked as harvested.'],
+            ]);
+        }
+
+        $field = $this->harvestEstimate->markHarvested($field, $validated);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        return response()->json([
+            'message' => 'Harvest recorded. Great work!',
+            'field' => $this->fieldHarvestPayload($field),
+            'shouldPromptRating' => ($user->app_rating_prompt_status ?? 'pending') === 'pending',
+        ]);
+    }
+
+    public function planNextCrop(Request $request, int $fieldId): JsonResponse
+    {
+        $validated = $request->validate([
+            'plannedNextCrop' => ['required', 'string', 'max:100'],
+            'plannedPlantAt' => ['required', 'date', 'after_or_equal:today'],
+        ]);
+
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        if (! $field->harvested_at) {
+            throw ValidationException::withMessages([
+                'plannedNextCrop' => ['Mark the field as harvested before planning the next crop.'],
+            ]);
+        }
+
+        $field = $this->harvestEstimate->planNextCrop(
+            $field,
+            $validated['plannedNextCrop'],
+            $validated['plannedPlantAt'],
+        );
+
+        return response()->json([
+            'message' => 'Next crop plan saved. We will remind you when it is time to plant.',
+            'field' => $this->fieldHarvestPayload($field),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fieldHarvestPayload(FarmField $field): array
+    {
+        return [
+            'id' => (string) $field->id,
+            'name' => $field->name,
+            'crop' => $field->crop,
+            'status' => $field->status,
+            'plantedAt' => $field->planted_at?->toIso8601String(),
+            'harvestStartDate' => $field->harvest_start_date?->toDateString(),
+            'harvestEndDate' => $field->harvest_end_date?->toDateString(),
+            'harvestedAt' => $field->harvested_at?->toDateString(),
+            'yieldNote' => $field->yield_note,
+            'plannedNextCrop' => $field->planned_next_crop,
+            'plannedPlantAt' => $field->planned_plant_at?->toDateString(),
+            'harvestWindowActive' => $field->isHarvestWindowActive(),
+            'daysSincePlanting' => $field->days_since_planting,
+            'canMarkHarvested' => $field->planted_at && ! $field->harvested_at,
+        ];
     }
 
     public function showField(Request $request, int $fieldId): JsonResponse
@@ -359,6 +440,12 @@ class FarmController extends Controller
                 'plantedAt' => $field->planted_at?->toIso8601String(),
                 'harvestStartDate' => $field->harvest_start_date?->toDateString(),
                 'harvestEndDate' => $field->harvest_end_date?->toDateString(),
+                'harvestedAt' => $field->harvested_at?->toDateString(),
+                'yieldNote' => $field->yield_note,
+                'plannedNextCrop' => $field->planned_next_crop,
+                'plannedPlantAt' => $field->planned_plant_at?->toDateString(),
+                'harvestWindowActive' => $field->isHarvestWindowActive(),
+                'canMarkHarvested' => (bool) $field->planted_at && ! $field->harvested_at,
                 'boundaryGeojson' => $field->boundary_geojson,
                 'hasMeasuredBoundary' => ! empty($field->boundary_geojson),
                 'totalExpense' => $totalExpense,

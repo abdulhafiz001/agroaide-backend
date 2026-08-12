@@ -94,7 +94,7 @@ class StaffOperationsTest extends TestCase
         $this->actingAs($agronomist)->get("/staff/evaluations/runs/{$runA->id}")
             ->assertOk()->assertSee('Tomato Late Blight')->assertSee('0.750');
         $this->actingAs($agronomist)->get("/staff/evaluations/compare?runs[]={$runA->id}&runs[]={$runB->id}")
-            ->assertOk()->assertSee('75.0%')->assertSee('Not measured');
+            ->assertOk()->assertSee('75.0%')->assertSee('—');
     }
 
     public function test_dashboard_active_farms_uses_last_thirty_day_activity_and_suppresses_small_counts(): void
@@ -111,11 +111,15 @@ class StaffOperationsTest extends TestCase
             'completed' => true, 'completed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        $this->actingAs($agronomist)->get('/staff')->assertOk()->assertSee('3 active farms');
+        $this->actingAs($agronomist)->get('/staff')->assertOk()
+            ->assertSee('Active farms (30 d)')
+            ->assertSee('>3</p>', false);
 
         DB::table('journal_entries')->where('user_id', $users[1]->id)->delete();
         DB::table('calendar_tasks')->where('user_id', $users[2]->id)->delete();
-        $this->actingAs($agronomist)->get('/staff')->assertOk()->assertSee('&lt;3 active farms', false);
+        $this->actingAs($agronomist)->get('/staff')->assertOk()
+            ->assertSee('Active farms (30 d)')
+            ->assertSee('&lt;3', false);
     }
 
     public function test_review_rejects_wrong_label_kinds_and_cross_crop_disease_pairs(): void

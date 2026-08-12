@@ -28,6 +28,12 @@ class FarmField extends Model
         'planted_at_recorded_at',
         'harvest_estimate_notified_at',
         'harvest_reminder_sent_at',
+        'harvested_at',
+        'yield_note',
+        'planned_next_crop',
+        'planned_plant_at',
+        'next_plant_remind_2d_sent_at',
+        'next_plant_remind_on_sent_at',
         'status',
     ];
 
@@ -46,7 +52,23 @@ class FarmField extends Model
             'planted_at_recorded_at' => 'datetime',
             'harvest_estimate_notified_at' => 'datetime',
             'harvest_reminder_sent_at' => 'datetime',
+            'harvested_at' => 'date',
+            'planned_plant_at' => 'date',
+            'next_plant_remind_2d_sent_at' => 'datetime',
+            'next_plant_remind_on_sent_at' => 'datetime',
         ];
+    }
+
+    public function isHarvestWindowActive(?\Carbon\CarbonInterface $on = null): bool
+    {
+        if (! $this->harvest_start_date || ! $this->harvest_end_date || $this->harvested_at) {
+            return false;
+        }
+
+        $day = ($on ?? now())->toDateString();
+
+        return $day >= $this->harvest_start_date->toDateString()
+            && $day <= $this->harvest_end_date->toDateString();
     }
 
     public function user(): BelongsTo

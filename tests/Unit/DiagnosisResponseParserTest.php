@@ -29,6 +29,29 @@ class DiagnosisResponseParserTest extends TestCase
         $this->assertSame(70, $parsed['confidencePercent']);
     }
 
+    public function test_rejects_prompt_instruction_leak_in_summary(): void
+    {
+        $parser = new DiagnosisResponseParser;
+        $parsed = $parser->parse(json_encode([
+            'crop' => 'potato',
+            'condition' => 'unknown',
+            'confidencePercent' => 37,
+            'summary' => '3-5 sentences for diseased. Mention symptoms (leaf yellowing, sticky honeydew).',
+            'details' => [
+                'plantsVisible' => 'plantsVisible, growthStage, overallVigor. I\'ll infer from context.',
+                'growthStage' => 'unknown',
+                'overallVigor' => 'stressed',
+            ],
+            'personalizedNote' => '4-6 farmer-friendly sentences for healthy crops.',
+            'disease' => null,
+            'recommendations' => ['immediate' => [], 'products' => [], 'prevention' => [], 'longTerm' => []],
+        ], JSON_THROW_ON_ERROR));
+
+        $this->assertTrue($parsed['promptLeak']);
+        $this->assertFalse($parser->looksLikePromptLeak($parsed['summary']));
+        $this->assertNull($parsed['details']);
+    }
+
     public function test_parses_prose_markdown_fields_from_vision_model(): void
     {
         $parser = new DiagnosisResponseParser;

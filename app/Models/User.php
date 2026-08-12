@@ -36,6 +36,7 @@ class User extends Authenticatable
         'push_token',
         'notification_preferences',
         'last_planting_prompt_on',
+        'app_rating_prompt_status',
         'ai_response_depth',
         'ai_risk_tolerance',
     ];

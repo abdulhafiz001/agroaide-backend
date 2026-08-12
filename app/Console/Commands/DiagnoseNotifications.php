@@ -76,8 +76,21 @@ class DiagnoseNotifications extends Command
 
         if ($user) {
             $this->newLine();
+            $hasConsent = $user->consents()
+                ->where('terms_version', config('legal.terms.version'))
+                ->where('privacy_version', config('legal.privacy.version'))
+                ->exists();
+            $this->line("User #{$user->id} email: {$user->email}");
+            $this->line('User has current legal consent: '.($hasConsent ? 'yes' : 'NO (older builds blocked /profile token upload with HTTP 428)'));
+            $this->line('User push_token present: '.(filled($user->push_token) ? 'yes' : 'NO'));
+
             if (empty($user->push_token)) {
-                $this->error("User #{$user->id} has no push_token. Open the Android app (not Expo Go) while logged in so the device token can register.");
+                $this->error("User #{$user->id} has no push_token.");
+                $this->line('Fix checklist:');
+                $this->line('  1) Install a NEW preview/production build (not Expo Go) that includes google-services.json');
+                $this->line('  2) Log in as this exact email, allow notifications, wait ~10s on dashboard');
+                $this->line('  3) Backend now accepts POST /api/auth/push-token without consent gate — redeploy API first');
+                $this->line('  4) Re-run: php artisan agroaide:diagnose-notifications --email='.$user->email);
 
                 return self::FAILURE;
             }

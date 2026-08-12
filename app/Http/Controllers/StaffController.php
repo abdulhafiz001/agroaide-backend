@@ -10,6 +10,8 @@ use App\Models\EvaluationRun;
 use App\Models\FarmImageAnalysis;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
+use App\Models\ScanFeedback;
+use App\Models\ScanReview;
 use App\Models\User;
 use App\Services\FarmImageAnalysisService;
 use App\Services\ScanVerificationService;
@@ -26,6 +28,8 @@ use Illuminate\View\View;
 
 class StaffController extends Controller
 {
+    // ─── Auth ──────────────────────────────────────────────────────────────
+
     public function login(): View
     {
         return view('staff.login', [
@@ -94,38 +98,76 @@ class StaffController extends Controller
         return redirect()->route('staff.login');
     }
 
+    // ─── Dashboard ─────────────────────────────────────────────────────────
+
     public function dashboard(): View
     {
         $latestRun = DB::table('evaluation_runs')->where('status', 'completed')->latest('completed_at')->first();
-        $queue = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
-            ->select([
-                'id', 'farm_field_id', 'predicted_disease_label_id', 'disease_name',
-                'normalized_confidence', 'verification_state',
-            ])
+        $latestAccuracy = $latestRun && $latestRun->metrics
+            ? data_get(json_decode($latestRun->metrics, true), 'accuracy')
+            : null;
+
+        $pendingScans = FarmImageAnalysis::whereIn('verification_state', ['pending_review', 'disputed'])->count();
+
+        $outbreakCount = DB::table('outbreak_events')->where('distinct_farmer_count', '>=', 3)->count();
+
+        $feedbackCount = DB::table('scan_feedback')
+            ->where('created_at', '>=', now()->subDays(7))
+            ->count();
+
+        $recentScans = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
+            ->select(['id', 'farm_field_id', 'predicted_disease_label_id', 'disease_name', 'normalized_confidence', 'verification_state', 'created_at'])
             ->whereIn('verification_state', ['pending_review', 'disputed'])
-            ->latest()->limit(50)->get();
-        $feedback = DB::table('scan_feedback')
-            ->select('farm_image_analysis_id', 'verdict', 'created_at')
-            ->latest()->limit(30)->get();
-        $datasets = DB::table('evaluation_datasets')->latest()->get();
-        $runs = DB::table('evaluation_runs')->latest()->limit(30)->get();
-        $classMetrics = $latestRun
-            ? DB::table('evaluation_class_metrics')
-                ->join('canonical_labels', 'canonical_labels.id', '=', 'evaluation_class_metrics.canonical_label_id')
-                ->where('evaluation_run_id', $latestRun->id)
-                ->select('evaluation_class_metrics.*', 'canonical_labels.name as label_name')->get()
-            : collect();
-        $outbreaks = DB::table('outbreak_events')->where('distinct_farmer_count', '>=', 3)->latest()->limit(30)->get();
-        $health = DB::table('provider_health_snapshots')->latest('checked_at')->limit(20)->get();
-        $jobs = DB::table('system_job_runs')->latest()->limit(30)->get();
-        $labels = DB::table('canonical_labels')->where('active', true)->orderBy('kind')->orderBy('name')->get();
+            ->latest()
+            ->limit(5)
+            ->get();
+
         $activeFarmCount = $this->activeFarmCount();
-        $isAdmin = request()->user()->isAdmin();
 
         return view('staff.dashboard', compact(
-            'latestRun', 'queue', 'feedback', 'datasets', 'runs', 'classMetrics',
-            'outbreaks', 'health', 'jobs', 'labels', 'activeFarmCount', 'isAdmin',
+            'latestAccuracy', 'pendingScans', 'outbreakCount', 'feedbackCount',
+            'recentScans', 'activeFarmCount',
         ));
+    }
+
+    // ─── Scan review ───────────────────────────────────────────────────────
+
+    public function scans(): View
+    {
+        $queue = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
+            ->select(['id', 'farm_field_id', 'predicted_disease_label_id', 'disease_name',
+                'normalized_confidence', 'verification_state', 'created_at'])
+            ->whereIn('verification_state', ['pending_review', 'disputed'])
+            ->latest()
+            ->paginate(24);
+
+        return view('staff.scans.index', compact('queue'));
+    }
+
+    public function scanShow(int $scan): View
+    {
+        $scan = FarmImageAnalysis::with([
+            'farmField:id,name,crop',
+            'predictedCropLabel:id,name,kind',
+            'predictedDiseaseLabel:id,name,kind',
+            'effectiveDiseaseLabel:id,name,kind',
+            'reviews',
+            'feedback',
+        ])->findOrFail($scan);
+
+        Gate::authorize('view', $scan);
+
+        // Load review history actors
+        $scan->reviews->load('actor:id,name');
+
+        $cropLabels = CanonicalLabel::where('kind', 'crop')->where('active', true)->orderBy('name')->get(['id', 'name']);
+        $diseaseLabels = CanonicalLabel::whereIn('kind', ['disease', 'condition'])->where('active', true)->orderBy('name')->get(['id', 'name', 'kind']);
+        $feedback = $scan->feedback()->latest()->get();
+
+        // Map result_json to human-readable labels
+        $resultFields = $this->mapResultFields($scan->result_json ?? []);
+
+        return view('staff.scans.show', compact('scan', 'cropLabels', 'diseaseLabels', 'feedback', 'resultFields'));
     }
 
     public function scanImage(Request $request, int $scan)
@@ -172,6 +214,72 @@ class StaffController extends Controller
         return back()->with('status', 'Review saved.');
     }
 
+    // ─── Farmer feedback ───────────────────────────────────────────────────
+
+    public function feedback(): View
+    {
+        $feedback = ScanFeedback::with(['analysis:id,farm_field_id,verification_state'])
+            ->select(['id', 'farm_image_analysis_id', 'verdict', 'comment', 'created_at'])
+            ->latest()
+            ->paginate(40);
+
+        $verdictSummary = DB::table('scan_feedback')
+            ->select('verdict', DB::raw('count(*) as total'))
+            ->groupBy('verdict')
+            ->orderByDesc('total')
+            ->get();
+
+        return view('staff.feedback', compact('feedback', 'verdictSummary'));
+    }
+
+    // ─── Outbreaks ─────────────────────────────────────────────────────────
+
+    public function outbreaks(): View
+    {
+        $outbreaks = DB::table('outbreak_events')
+            ->join('canonical_labels', 'canonical_labels.id', '=', 'outbreak_events.canonical_label_id')
+            ->select('outbreak_events.*', 'canonical_labels.name as label_name')
+            ->where('distinct_farmer_count', '>=', 3)
+            ->latest('period_start')
+            ->paginate(50);
+
+        $levelSummary = DB::table('outbreak_events')
+            ->where('distinct_farmer_count', '>=', 3)
+            ->select('level', DB::raw('count(*) as total'))
+            ->groupBy('level')
+            ->orderByDesc('total')
+            ->get();
+
+        return view('staff.outbreaks', compact('outbreaks', 'levelSummary'));
+    }
+
+    // ─── System health ─────────────────────────────────────────────────────
+
+    public function health(): View
+    {
+        $health = DB::table('provider_health_snapshots')
+            ->orderByDesc('checked_at')
+            ->limit(30)
+            ->get();
+
+        $jobs = DB::table('system_job_runs')
+            ->orderByDesc('created_at')
+            ->limit(40)
+            ->get();
+
+        return view('staff.health', compact('health', 'jobs'));
+    }
+
+    // ─── Advanced: evaluations ─────────────────────────────────────────────
+
+    public function evaluations(): View
+    {
+        $datasets = EvaluationDataset::withCount('items')->latest()->get();
+        $runs = EvaluationRun::latest()->limit(20)->get();
+
+        return view('staff.evaluations', compact('datasets', 'runs'));
+    }
+
     public function dataset(EvaluationDataset $dataset): View
     {
         $dataset->loadCount('items');
@@ -201,6 +309,25 @@ class StaffController extends Controller
         }
 
         return view('staff.compare', compact('runs'));
+    }
+
+    // ─── Admin ─────────────────────────────────────────────────────────────
+
+    public function admin(): View
+    {
+        Gate::authorize('administer', User::class);
+        $policies = ConfidencePolicy::latest()->get();
+        $users = User::select('id', 'name', 'email', 'role')->orderBy('name')->paginate(100);
+
+        return view('staff.admin', compact('policies', 'users'));
+    }
+
+    public function audit(): View
+    {
+        Gate::authorize('administer', User::class);
+        $events = DB::table('audit_logs')->latest()->paginate(100);
+
+        return view('staff.audit', compact('events'));
     }
 
     public function queueRun(Request $request, EvaluationDataset $dataset): RedirectResponse
@@ -273,23 +400,7 @@ class StaffController extends Controller
         return back()->with('status', 'Staff role updated.');
     }
 
-    public function audit(): View
-    {
-        Gate::authorize('administer', User::class);
-        $events = DB::table('audit_logs')->latest()->paginate(100);
-
-        return view('staff.audit', compact('events'));
-    }
-
-    public function admin(): View
-    {
-        Gate::authorize('administer', User::class);
-        $policies = ConfidencePolicy::latest()->get();
-        $users = User::select('id', 'name', 'email', 'role')->orderBy('name')->paginate(100);
-        $datasets = EvaluationDataset::withCount('items')->latest()->get();
-
-        return view('staff.admin', compact('policies', 'users', 'datasets'));
-    }
+    // ─── Helpers ───────────────────────────────────────────────────────────
 
     private function activeFarmCount(): int
     {
@@ -301,6 +412,42 @@ class StaffController extends Controller
             ->merge(DB::table('calendar_tasks')->where('completed', true)->where('completed_at', '>=', $cutoff)->pluck('user_id'))
             ->merge(DB::table('field_transactions')->where('created_at', '>=', $cutoff)->pluck('user_id'))
             ->filter()->unique()->count();
+    }
+
+    /**
+     * Map result_json keys to human-readable display labels.
+     * Renders any string/numeric leaf values, skipping raw arrays.
+     *
+     * @param  array<string, mixed>  $resultJson
+     * @return array<string, string>
+     */
+    private function mapResultFields(array $resultJson): array
+    {
+        $labelMap = [
+            'summary' => 'AI summary',
+            'personalized_note' => 'Personalised note',
+            'treatment' => 'Treatment',
+            'treatment_recommendation' => 'Treatment recommendation',
+            'recommendations' => 'Recommendations',
+            'severity' => 'Severity',
+            'spread_risk' => 'Spread risk',
+            'confidence_explanation' => 'Confidence explanation',
+            'next_steps' => 'Next steps',
+        ];
+
+        $fields = [];
+        foreach ($resultJson as $key => $value) {
+            if (is_array($value)) {
+                $value = implode(', ', array_filter(array_values($value), fn ($v) => is_scalar($v)));
+            }
+            if (! is_scalar($value) || $value === null || $value === '') {
+                continue;
+            }
+            $label = $labelMap[$key] ?? ucwords(str_replace('_', ' ', $key));
+            $fields[$label] = (string) $value;
+        }
+
+        return $fields;
     }
 
     private function validateCorrectionLabels(array $data, FarmImageAnalysis $scan): void

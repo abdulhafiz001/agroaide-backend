@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\PlantingReminder;
+use App\Services\HarvestEstimateService;
 use App\Services\NotificationDispatcher;
 use Illuminate\Console\Command;
 
@@ -12,8 +13,10 @@ class SendPlantingReminders extends Command
 
     protected $description = 'Send FCM for planting reminders (2 days before + planting day)';
 
-    public function __construct(private NotificationDispatcher $dispatcher)
-    {
+    public function __construct(
+        private NotificationDispatcher $dispatcher,
+        private HarvestEstimateService $harvestEstimate,
+    ) {
         parent::__construct();
     }
 
@@ -77,6 +80,8 @@ class SendPlantingReminders extends Command
                 $sent++;
             }
         }
+
+        $sent += $this->harvestEstimate->sendDueNextPlantReminders();
 
         $this->info("Sent {$sent} planting reminder(s).");
 

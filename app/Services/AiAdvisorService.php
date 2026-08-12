@@ -521,8 +521,20 @@ PROMPT;
             $harvest = ($field->harvest_start_date && $field->harvest_end_date)
                 ? $field->harvest_start_date->toDateString().' to '.$field->harvest_end_date->toDateString()
                 : 'not estimated yet';
+            $harvested = $field->harvested_at?->toDateString();
+            $cycle = $harvested
+                ? sprintf(
+                    'SUCCESSFULLY_HARVESTED on %s (last crop=%s%s)%s',
+                    $harvested,
+                    $field->crop ?? 'n/a',
+                    $field->yield_note ? ', yield_note='.$field->yield_note : '',
+                    ($field->planned_next_crop && $field->planned_plant_at)
+                        ? sprintf('; plans next crop=%s on %s', $field->planned_next_crop, $field->planned_plant_at->toDateString())
+                        : '; no next crop planned yet',
+                )
+                : sprintf('growing; harvest_window=%s', $harvest);
             $lines[] = sprintf(
-                '- %s: crop=%s, area=%s m2, health=%s%%, moisture=%s%%, status=%s, planted_at=%s, harvest_window=%s',
+                '- %s: crop=%s, area=%s m2, health=%s%%, moisture=%s%%, status=%s, planted_at=%s, cycle=%s',
                 $field->name ?? 'Field',
                 $field->crop ?? 'n/a',
                 $field->area_m2 ?? 'n/a',
@@ -530,7 +542,7 @@ PROMPT;
                 $field->moisture_percentage ?? 'n/a',
                 $field->status ?? 'active',
                 $planted,
-                $harvest,
+                $cycle,
             );
         }
 

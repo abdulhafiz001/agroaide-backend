@@ -142,6 +142,30 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Register / refresh the device FCM token.
+     * Intentionally outside consent.current so push can register before re-consent.
+     */
+    public function registerPushToken(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'pushToken' => ['required', 'string', 'max:4096'],
+            'platform' => ['nullable', 'string', 'max:32'],
+        ]);
+
+        $user->update([
+            'push_token' => $validated['pushToken'],
+        ]);
+
+        return response()->json([
+            'message' => 'Push token registered.',
+            'hasPushToken' => filled($user->fresh()->push_token),
+        ]);
+    }
+
     public function updateProfile(Request $request): JsonResponse
     {
         /** @var User $user */
@@ -414,6 +438,7 @@ class AuthController extends Controller
             'notificationPreferences' => $this->resolveNotificationPreferences($user),
             'aiResponseDepth' => $user->ai_response_depth ?? 'balanced',
             'aiRiskTolerance' => $user->ai_risk_tolerance ?? 'balanced',
+            'shouldPromptRating' => ($user->app_rating_prompt_status ?? 'pending') === 'pending',
             'consentRequired' => ! $user->consents()
                 ->where('terms_version', config('legal.terms.version'))
                 ->where('privacy_version', config('legal.privacy.version'))

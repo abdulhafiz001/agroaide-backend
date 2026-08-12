@@ -86,6 +86,11 @@ class CropDiagnosisService
             $parsed = $this->parser->normalize($this->fromKindwiseFallback($kindwise), $farmerJson);
         }
 
+        $promptLeak = ! empty($parsed['promptLeak'])
+            || $this->parser->looksLikePromptLeak((string) ($parsed['summary'] ?? ''))
+            || $this->parser->looksLikePromptLeak((string) ($parsed['personalizedNote'] ?? ''));
+        unset($parsed['promptLeak']);
+
         // Prefer Kindwise identity fields when Gemini drifts.
         if (! empty($kindwise['crop']['name'])) {
             $parsed['crop'] = $kindwise['crop']['name'];
@@ -102,6 +107,13 @@ class CropDiagnosisService
             }
         }
 
+        // Crop photo + Kindwise crop ID must never stay "unknown" (Gemini sometimes echoes schema).
+        if (($kindwise['is_crop'] ?? false) && ($parsed['condition'] ?? '') === 'unknown') {
+            $fallback = $this->fromKindwiseFallback($kindwise);
+            $parsed = array_merge($parsed, $fallback);
+            $promptLeak = true;
+        }
+
         // Never show a disease card when condition is unknown / not a crop.
         if (($parsed['condition'] ?? '') === 'unknown') {
             $parsed['disease'] = null;
@@ -109,21 +121,28 @@ class CropDiagnosisService
 
         $isHealthyResult = ! empty($kindwise['is_healthy'])
             || in_array($parsed['condition'] ?? '', ['healthy', 'good'], true);
-        if ($isHealthyResult) {
-            $parsed['disease'] = null;
-            $parsed['recommendations'] = [
-                'immediate' => [],
-                'products' => [],
-                'prevention' => [],
-                'longTerm' => [],
-            ];
-            // If Gemini still returns a tiny summary, expand with Kindwise-backed copy.
-            if (str_word_count((string) ($parsed['summary'] ?? '')) < 28) {
+        if ($isHealthyResult || $promptLeak) {
+            if ($isHealthyResult || ($kindwise['is_crop'] ?? false)) {
                 $fallback = $this->fromKindwiseFallback($kindwise);
-                $parsed['summary'] = $fallback['summary'];
-                if (str_word_count((string) ($parsed['personalizedNote'] ?? '')) < 12) {
+                if ($promptLeak || str_word_count((string) ($parsed['summary'] ?? '')) < 28) {
+                    $parsed['summary'] = $fallback['summary'];
                     $parsed['personalizedNote'] = $fallback['personalizedNote'];
+                    $parsed['details'] = $fallback['details'];
+                    $parsed['condition'] = $fallback['condition'];
+                    $parsed['conditionLabel'] = $fallback['conditionLabel'];
+                    if (empty($parsed['crop'])) {
+                        $parsed['crop'] = $fallback['crop'];
+                    }
                 }
+            }
+            if ($isHealthyResult) {
+                $parsed['disease'] = null;
+                $parsed['recommendations'] = [
+                    'immediate' => [],
+                    'products' => [],
+                    'prevention' => [],
+                    'longTerm' => [],
+                ];
             }
         }
 

@@ -53,6 +53,11 @@ class DiagnosisResponseParser
     {
         $condition = $this->normalizeCondition((string) ($parsed['condition'] ?? 'unknown'));
         $summary = trim((string) ($parsed['summary'] ?? ''));
+        $noteRaw = trim((string) ($parsed['personalizedNote'] ?? ''));
+        $promptLeak = $this->looksLikePromptLeak($summary) || $this->looksLikePromptLeak($noteRaw);
+        if ($this->looksLikePromptLeak($summary)) {
+            $summary = '';
+        }
         if ($summary === '') {
             $summary = 'Crop analysis completed. Review the recommendations below.';
         }
@@ -117,11 +122,18 @@ class DiagnosisResponseParser
         } elseif (! is_array($details)) {
             $details = null;
         } else {
-            $details = [
-                'plantsVisible' => (string) ($details['plantsVisible'] ?? ''),
-                'growthStage' => (string) ($details['growthStage'] ?? 'unknown'),
-                'overallVigor' => (string) ($details['overallVigor'] ?? $condition),
-            ];
+            $plantsVisible = (string) ($details['plantsVisible'] ?? '');
+            $growthStage = (string) ($details['growthStage'] ?? 'unknown');
+            $overallVigor = (string) ($details['overallVigor'] ?? $condition);
+            if ($this->looksLikePromptLeak($plantsVisible) || $this->looksLikePromptLeak($growthStage) || $this->looksLikePromptLeak($overallVigor)) {
+                $details = null;
+            } else {
+                $details = [
+                    'plantsVisible' => $plantsVisible,
+                    'growthStage' => $growthStage,
+                    'overallVigor' => $overallVigor,
+                ];
+            }
         }
 
         $crop = $parsed['crop'] ?? null;
@@ -147,8 +159,61 @@ class DiagnosisResponseParser
                 'prevention' => $this->stringList($recommendations['prevention'] ?? ['Scout the field weekly for early symptoms']),
                 'longTerm' => $this->stringList($recommendations['longTerm'] ?? []),
             ],
-            'personalizedNote' => trim((string) ($parsed['personalizedNote'] ?? $summary)),
+            'personalizedNote' => $this->sanitizeFarmerText($noteRaw, $summary),
+            'promptLeak' => $promptLeak,
         ];
+    }
+
+    public function looksLikePromptLeak(string $text): bool
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return false;
+        }
+
+        $lower = strtolower($text);
+        $needles = [
+            '3-5 sentences',
+            '4-6 sentences',
+            '4-6 farmer-friendly',
+            'farmer-friendly sentences',
+            'mention symptoms',
+            'treatment notes',
+            "i'll infer",
+            'i will infer',
+            'plantsvisible',
+            'growthstage',
+            'overallvigor',
+            'personalizednote',
+            'keep summary',
+            'write a warm',
+            'for diseased',
+            'for healthy crops',
+            'seedling|vegetative',
+            'healthy|stressed',
+        ];
+
+        foreach ($needles as $needle) {
+            if (str_contains($lower, $needle)) {
+                return true;
+            }
+        }
+
+        // Schema placeholders often list field names with commas.
+        if (preg_match('/\bplantsVisible\b.*\bgrowthStage\b/i', $text) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function sanitizeFarmerText(string $text, string $fallback): string
+    {
+        if ($text === '' || $this->looksLikePromptLeak($text)) {
+            return $fallback;
+        }
+
+        return $text;
     }
 
     private function normalizeConfidence(mixed $value): int

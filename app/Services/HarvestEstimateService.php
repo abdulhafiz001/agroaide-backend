@@ -42,10 +42,22 @@ class HarvestEstimateService
 
     public function applyPlantedAt(FarmField $field, string $plantedOn): FarmField
     {
+        // If they planned a next crop, adopt it as the active crop when planting starts.
+        if (filled($field->planned_next_crop)) {
+            $field->crop = (string) $field->planned_next_crop;
+        }
+
         $field->planted_at = Carbon::parse($plantedOn)->toDateString();
         $field->planted_at_recorded_at = now();
         $field->harvest_estimate_notified_at = null;
         $field->harvest_reminder_sent_at = null;
+        $field->harvested_at = null;
+        $field->yield_note = null;
+        $field->planned_next_crop = null;
+        $field->planned_plant_at = null;
+        $field->next_plant_remind_2d_sent_at = null;
+        $field->next_plant_remind_on_sent_at = null;
+        $field->status = 'active';
 
         $window = $this->computeWindow($field);
         if ($window) {
@@ -57,6 +69,57 @@ class HarvestEstimateService
         $this->syncCalendarHarvestTasks($field);
 
         return $field->fresh();
+    }
+
+    /**
+     * @param  array{harvestedAt?:string,yieldNote?:?string,plannedNextCrop?:?string,plannedPlantAt?:?string}  $data
+     */
+    public function markHarvested(FarmField $field, array $data): FarmField
+    {
+        $harvestedAt = Carbon::parse($data['harvestedAt'] ?? now()->toDateString())->toDateString();
+
+        $field->harvested_at = $harvestedAt;
+        $field->yield_note = isset($data['yieldNote']) ? trim((string) $data['yieldNote']) ?: null : $field->yield_note;
+        $field->status = 'fallow';
+        $field->harvest_start_date = null;
+        $field->harvest_end_date = null;
+        $field->harvest_estimate_notified_at = $field->harvest_estimate_notified_at ?? now();
+        $field->harvest_reminder_sent_at = $field->harvest_reminder_sent_at ?? now();
+
+        if (! empty($data['plannedNextCrop']) && ! empty($data['plannedPlantAt'])) {
+            $field->planned_next_crop = trim((string) $data['plannedNextCrop']);
+            $field->planned_plant_at = Carbon::parse($data['plannedPlantAt'])->toDateString();
+            $field->next_plant_remind_2d_sent_at = null;
+            $field->next_plant_remind_on_sent_at = null;
+        }
+
+        $field->save();
+        $this->clearCalendarHarvestTasks($field);
+
+        return $field->fresh();
+    }
+
+    public function planNextCrop(FarmField $field, string $crop, string $plantOn): FarmField
+    {
+        $field->planned_next_crop = trim($crop);
+        $field->planned_plant_at = Carbon::parse($plantOn)->toDateString();
+        $field->next_plant_remind_2d_sent_at = null;
+        $field->next_plant_remind_on_sent_at = null;
+        $field->save();
+
+        return $field->fresh();
+    }
+
+    public function clearCalendarHarvestTasks(FarmField $field): void
+    {
+        if (! $field->user_id) {
+            return;
+        }
+
+        $marker = "[harvest-window:fieldId={$field->id}]";
+        CalendarTask::where('user_id', $field->user_id)
+            ->where('description', 'like', "%{$marker}%")
+            ->delete();
     }
 
     /**
@@ -103,6 +166,7 @@ class HarvestEstimateService
         $fields = FarmField::query()
             ->whereNotNull('planted_at')
             ->whereNotNull('planted_at_recorded_at')
+            ->whereNull('harvested_at')
             ->whereNull('harvest_estimate_notified_at')
             ->where('planted_at_recorded_at', '<=', $cutoff)
             ->with('user')
@@ -169,6 +233,7 @@ class HarvestEstimateService
 
         $fields = FarmField::query()
             ->whereDate('harvest_start_date', $tomorrow)
+            ->whereNull('harvested_at')
             ->whereNull('harvest_reminder_sent_at')
             ->with('user')
             ->get();
@@ -226,17 +291,109 @@ class HarvestEstimateService
     public function fieldsNeedingPlantDate(User $user): array
     {
         return FarmField::where('user_id', $user->id)
-            ->whereNull('planted_at')
             ->where('status', '!=', 'archived')
+            ->where(function ($q) {
+                $q->whereNull('planted_at')
+                    ->orWhere(function ($q2) {
+                        // Fallow + next crop planned: nudge around the plant-by date.
+                        $q2->where('status', 'fallow')
+                            ->whereNotNull('harvested_at')
+                            ->whereNotNull('planned_next_crop')
+                            ->whereNotNull('planned_plant_at')
+                            ->whereDate('planned_plant_at', '<=', now()->addDays(3)->toDateString());
+                    });
+            })
             ->orderBy('name')
-            ->get(['id', 'name', 'crop'])
+            ->get(['id', 'name', 'crop', 'planned_next_crop'])
             ->map(fn (FarmField $f) => [
                 'id' => (string) $f->id,
                 'name' => $f->name,
-                'crop' => $f->crop,
+                'crop' => $f->planned_next_crop ?: $f->crop,
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * Notify for planned next plant: 2 days before + planting day.
+     */
+    public function sendDueNextPlantReminders(): int
+    {
+        $sent = 0;
+        $today = now()->startOfDay();
+        $inTwoDays = now()->addDays(2)->toDateString();
+
+        $due2d = FarmField::query()
+            ->whereNotNull('planned_next_crop')
+            ->whereNotNull('planned_plant_at')
+            ->whereNotNull('harvested_at')
+            ->whereNull('next_plant_remind_2d_sent_at')
+            ->whereDate('planned_plant_at', $inTwoDays)
+            ->with('user')
+            ->get();
+
+        foreach ($due2d as $field) {
+            $user = $field->user;
+            if (! $user) {
+                continue;
+            }
+            $n = $this->dispatcher->notify(
+                $user,
+                'next_plant_reminder',
+                "Plant {$field->planned_next_crop} in 2 days",
+                "Reminder: planting day for {$field->planned_next_crop}"
+                    .($field->name ? " on {$field->name}" : '')
+                    ." is {$field->planned_plant_at->toDateString()}. Prepare seed and land.",
+                [
+                    'fieldId' => (string) $field->id,
+                    'crop' => $field->planned_next_crop,
+                    'plantOn' => $field->planned_plant_at->toDateString(),
+                    'kind' => 'two_days_before',
+                ],
+                ['push' => true, 'preference' => 'plantingWindowAlerts', 'dedupeMinutes' => 10080, 'dedupeKey' => 'fieldId'],
+            );
+            if ($n) {
+                $field->update(['next_plant_remind_2d_sent_at' => now()]);
+                $sent++;
+            }
+        }
+
+        $dueOn = FarmField::query()
+            ->whereNotNull('planned_next_crop')
+            ->whereNotNull('planned_plant_at')
+            ->whereNotNull('harvested_at')
+            ->whereNull('next_plant_remind_on_sent_at')
+            ->whereDate('planned_plant_at', '<=', $today->toDateString())
+            ->with('user')
+            ->get();
+
+        foreach ($dueOn as $field) {
+            $user = $field->user;
+            if (! $user) {
+                continue;
+            }
+            $n = $this->dispatcher->notify(
+                $user,
+                'next_plant_reminder',
+                "Plant {$field->planned_next_crop} today",
+                "Today is your planting day for {$field->planned_next_crop}"
+                    .($field->name ? " on {$field->name}" : '')
+                    .'. Open the field to record your planting date.',
+                [
+                    'fieldId' => (string) $field->id,
+                    'crop' => $field->planned_next_crop,
+                    'plantOn' => $field->planned_plant_at->toDateString(),
+                    'kind' => 'planting_day',
+                ],
+                ['push' => true, 'preference' => 'plantingWindowAlerts', 'dedupeMinutes' => 10080, 'dedupeKey' => 'fieldId'],
+            );
+            if ($n) {
+                $field->update(['next_plant_remind_on_sent_at' => now()]);
+                $sent++;
+            }
+        }
+
+        return $sent;
     }
 
     private function normalizeCrop(string $crop): string

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdvisorController;
+use App\Http\Controllers\Api\AppRatingController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CalendarController;
 use App\Http\Controllers\Api\DashboardController;
@@ -34,6 +35,8 @@ Route::prefix('auth')->group(function (): void {
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::get('/me', [AuthController::class, 'me']);
         Route::put('/profile', [AuthController::class, 'updateProfile'])->middleware('consent.current');
+        // Push token must work even when legal re-consent is pending (428 on /profile).
+        Route::post('/push-token', [AuthController::class, 'registerPushToken']);
         Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('consent.current');
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::post('/consent', [LegalController::class, 'consent']);
@@ -46,6 +49,9 @@ Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void 
     Route::get('/farm/planting-prompt', [FarmController::class, 'plantingPrompt']);
     Route::post('/farm/planting-prompt/dismiss', [FarmController::class, 'dismissPlantingPrompt']);
     Route::post('/farm/fields/{fieldId}/planted-at', [FarmController::class, 'recordPlantedAt']);
+    Route::post('/farm/fields/{fieldId}/harvest', [FarmController::class, 'markHarvested']);
+    Route::post('/farm/fields/{fieldId}/plan-next-crop', [FarmController::class, 'planNextCrop']);
+    Route::post('/app/ratings', [AppRatingController::class, 'store']);
     Route::get('/farm/fields/{fieldId}', [FarmController::class, 'showField']);
     Route::post('/farm/fields', [FarmController::class, 'addField']);
     Route::put('/farm/fields/{fieldId}', [FarmController::class, 'updateField']);
