@@ -32,4 +32,4 @@ storage/pail
 tests
 phpunit.xml
 docker-compose*.yml
-Dockerfile*
+# Keep Dockerfile in context for some Coolify/build tooling; do not ignore it.

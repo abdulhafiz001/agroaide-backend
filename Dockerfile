@@ -1,6 +1,5 @@
 # AgroAide Laravel API — production image for Coolify
 # PHP 8.3 (composer.json requires ^8.2), nginx + php-fpm + schedule:work
-# No queue worker: codebase has zero ShouldQueue jobs/listeners.
 
 # -----------------------------------------------------------------------------
 # Stage 1: Composer dependencies
@@ -51,30 +50,17 @@ ENV APP_HOME=/var/www/html \
     PHP_OPCACHE_ENABLE=1 \
     PHP_OPCACHE_VALIDATE_TIMESTAMPS=0
 
-# System deps + nginx + supervisor
-# PHP extensions actually needed by this app:
-#   pdo_mysql  — Coolify/production DB (DB_CONNECTION=mysql)
-#   mbstring, xml, ctype, fileinfo, tokenizer — Laravel core
-#   openssl    — HTTPS clients + FCM JWT signing
-#   zip        — Composer packages / archives
-#   bcmath     — Laravel / money-safe math
-#   intl       — localization
-#   opcache    — production performance
-#   pcntl      — schedule:work signal handling
-# NOT installed (not used by current config/code):
-#   gd/imagick, redis, pdo_pgsql, memcached, exif
+# Faster/more reliable than compiling each ext with docker-php-ext-install
+# (Coolify aarch64 builds were timing out / OOM while compiling intl + opcache).
+COPY --from=mlocati/php-extension-installer /usr/bin/install-php-extensions /usr/local/bin/
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
         curl \
         unzip \
         git \
-        pkg-config \
-        libzip-dev \
-        libicu-dev \
-        libonig-dev \
-    && docker-php-ext-configure intl \
-    && docker-php-ext-install -j"$(nproc)" \
+    && install-php-extensions \
         pdo_mysql \
         mbstring \
         zip \
