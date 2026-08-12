@@ -21,6 +21,7 @@ class FarmImageAnalysisService
         private DiseaseOutbreakService $outbreakService,
         private NotificationDispatcher $dispatcher,
         private LlmChatClient $llm,
+        private CloudinaryStorageService $cloudinary,
     ) {
         $this->plantNetKey = trim(config('services.plantnet.api_key') ?? env('PLANTNET_API_KEY', ''));
         $this->plantNetEndpoint = trim(config('services.plantnet.endpoint') ?? 'https://my-api.plantnet.org/v2');
@@ -31,8 +32,8 @@ class FarmImageAnalysisService
      */
     public function analyze(User $user, string $base64Image, ?int $farmFieldId = null): array
     {
-        $storedPath = $this->storeImage($user, $base64Image);
-        if ($storedPath === null) {
+        $stored = $this->storeImage($user, $base64Image);
+        if ($stored === null) {
             throw new \RuntimeException('Validated scan image could not be stored.');
         }
 
@@ -41,7 +42,9 @@ class FarmImageAnalysisService
             'farm_field_id' => $farmFieldId,
             'latitude' => $user->farm_latitude,
             'longitude' => $user->farm_longitude,
-            'image_path' => $storedPath,
+            'image_path' => $stored['path'],
+            'image_url' => $stored['url'],
+            'image_public_id' => $stored['public_id'],
             'condition' => 'unknown',
             'disease_name' => null,
             'result_json' => [],
@@ -128,11 +131,11 @@ class FarmImageAnalysisService
             'outbreakEligible' => (bool) $a->outbreak_eligible,
             'safeErrorCode' => $a->safe_error_code,
             'feedback' => $this->transformFeedback($a),
-            // Served via authenticated API so private-disk images work on devices
-            // (APP_URL/localhost public URLs break on real phones).
-            'imagePath' => $a->image_path
-                ? "/farm/scan-history/{$a->id}/image"
-                : null,
+            // Prefer Cloudinary secure URL; fall back to authenticated API proxy for legacy local files.
+            'imagePath' => $a->image_url
+                ?: ($a->image_path ? "/farm/scan-history/{$a->id}/image" : null),
+            'imagePublicId' => $a->image_public_id,
+            'imageUrl' => $a->image_url,
         ];
     }
 
@@ -157,7 +160,7 @@ class FarmImageAnalysisService
     }
 
     /**
-     * Stream a scan image from public or private local storage.
+     * Redirect to Cloudinary or stream a legacy local scan image.
      */
     public function getImageResponseForUser(User $user, int|string $scanId)
     {
@@ -165,7 +168,15 @@ class FarmImageAnalysisService
             ->where('id', $scanId)
             ->first();
 
-        if (! $scan || ! $scan->image_path) {
+        if (! $scan) {
+            return null;
+        }
+
+        if ($scan->image_url) {
+            return redirect()->away($scan->image_url);
+        }
+
+        if (! $scan->image_path) {
             return null;
         }
 
@@ -488,7 +499,10 @@ PROMPT;
         ];
     }
 
-    private function storeImage(User $user, string $base64Image): ?string
+    /**
+     * @return array{path: string, url: string, public_id: string}|null
+     */
+    private function storeImage(User $user, string $base64Image): ?array
     {
         try {
             $imageData = $this->extractRawBase64($base64Image);
@@ -497,7 +511,8 @@ PROMPT;
                 return null;
             }
             $info = @getimagesizefromstring($decoded);
-            $extension = match ($info['mime'] ?? null) {
+            $mime = $info['mime'] ?? null;
+            $extension = match ($mime) {
                 'image/png' => 'png',
                 'image/webp' => 'webp',
                 'image/jpeg' => 'jpg',
@@ -507,16 +522,17 @@ PROMPT;
                 return null;
             }
 
-            $dir = "farm-scans/{$user->id}";
-            $filename = date('Ymd_His').'_'.$this->randomName().'.'.$extension;
-            $path = "{$dir}/{$filename}";
+            $folder = trim((string) config('services.cloudinary.folder', 'agroaide/uploads'), '/')."/farm-scans/{$user->id}";
+            $uploaded = $this->cloudinary->uploadBuffer($decoded, $folder, null, $mime);
 
-            // Keep on the default local disk; images are served via authenticated API.
-            Storage::disk('local')->put($path, $decoded);
-
-            return $path;
+            return [
+                // Keep a stable local-style path for older code paths / exports.
+                'path' => 'cloudinary:'.$uploaded['public_id'],
+                'url' => $uploaded['secure_url'],
+                'public_id' => $uploaded['public_id'],
+            ];
         } catch (\Exception $e) {
-            Log::warning('Failed to store scan image', ['error' => $e->getMessage()]);
+            Log::warning('Failed to store scan image on Cloudinary', ['error' => $e->getMessage()]);
 
             return null;
         }
@@ -529,11 +545,6 @@ PROMPT;
         }
 
         return $input;
-    }
-
-    private function randomName(): string
-    {
-        return bin2hex(random_bytes(8));
     }
 
     private function updateFieldHealth(FarmField $field, string $condition): void

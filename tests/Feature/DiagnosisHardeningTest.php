@@ -5,11 +5,13 @@ namespace Tests\Feature;
 use App\Jobs\ProcessCropScan;
 use App\Models\FarmImageAnalysis;
 use App\Models\User;
+use App\Services\CloudinaryStorageService;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use Tests\TestCase;
 
 class DiagnosisHardeningTest extends TestCase
@@ -37,6 +39,16 @@ class DiagnosisHardeningTest extends TestCase
         Queue::fake();
         $user = User::factory()->create();
 
+        $cloudinary = Mockery::mock(CloudinaryStorageService::class);
+        $cloudinary->shouldReceive('uploadBuffer')->once()->andReturn([
+            'public_id' => 'agroaide/uploads/farm-scans/1/test-scan',
+            'secure_url' => 'https://res.cloudinary.com/demo/image/upload/v1/agroaide/uploads/farm-scans/1/test-scan.png',
+            'url' => 'https://res.cloudinary.com/demo/image/upload/v1/agroaide/uploads/farm-scans/1/test-scan.png',
+            'bytes' => 68,
+            'format' => 'png',
+        ]);
+        $this->app->instance(CloudinaryStorageService::class, $cloudinary);
+
         $response = $this->actingAs($user, 'sanctum')->postJson('/api/farm/analyze-image', [
             'imageBase64' => 'data:image/png;base64,'.base64_encode(
                 hex2bin('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415408d763f8cfc0f01f00050001ff89993d1d0000000049454e44ae426082')
@@ -44,9 +56,12 @@ class DiagnosisHardeningTest extends TestCase
         ]);
 
         $response->assertAccepted()
-            ->assertJsonPath('scan.processingState', 'queued');
+            ->assertJsonPath('scan.processingState', 'queued')
+            ->assertJsonPath('scan.imageUrl', 'https://res.cloudinary.com/demo/image/upload/v1/agroaide/uploads/farm-scans/1/test-scan.png');
         $scan = FarmImageAnalysis::findOrFail($response->json('scan.id'));
         $this->assertNotNull($scan->image_path);
+        $this->assertSame('agroaide/uploads/farm-scans/1/test-scan', $scan->image_public_id);
+        $this->assertNotNull($scan->image_url);
         Queue::assertPushed(ProcessCropScan::class, fn ($job) => $job->scanId === $scan->id);
     }
 

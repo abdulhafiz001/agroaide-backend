@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\FarmImageAnalysis;
+use App\Services\CloudinaryStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,8 @@ use Illuminate\Validation\ValidationException;
 
 class PrivacyController extends Controller
 {
+    public function __construct(private CloudinaryStorageService $cloudinary) {}
+
     public function export(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -49,6 +52,7 @@ class PrivacyController extends Controller
     {
         $scan = FarmImageAnalysis::where('user_id', $request->user()->id)->findOrFail($scanId);
         $imagePath = $scan->image_path;
+        $publicId = $scan->image_public_id;
 
         DB::transaction(function () use ($scan): void {
             // Related feedback / reviews cascade, but delete explicitly for clarity.
@@ -61,7 +65,7 @@ class PrivacyController extends Controller
             $scan->delete();
         });
 
-        $this->deleteScanFile($imagePath);
+        $this->deleteScanAsset($publicId, $imagePath);
 
         return response()->json(['message' => 'Scan and image deleted.']);
     }
@@ -81,8 +85,9 @@ class PrivacyController extends Controller
             throw ValidationException::withMessages(['password' => ['The password is incorrect.']]);
         }
 
-        foreach ($user->farmImageAnalyses()->pluck('image_path') as $path) {
-            $this->deleteScanFile($path);
+        $scans = $user->farmImageAnalyses()->get(['image_path', 'image_public_id']);
+        foreach ($scans as $scan) {
+            $this->deleteScanAsset($scan->image_public_id, $scan->image_path);
         }
         Storage::disk('local')->deleteDirectory("farm-scans/{$user->id}");
         Storage::disk('local')->deleteDirectory("exports/{$user->id}");
@@ -92,11 +97,16 @@ class PrivacyController extends Controller
         return response()->json(['message' => 'Account and personal data deleted.']);
     }
 
-    private function deleteScanFile(?string $path): void
+    private function deleteScanAsset(?string $publicId, ?string $path): void
     {
-        if (! $path) {
+        if ($publicId) {
+            $this->cloudinary->delete($publicId);
+        }
+
+        if (! $path || str_starts_with($path, 'cloudinary:')) {
             return;
         }
+
         foreach (['local', 'public'] as $disk) {
             Storage::disk($disk)->delete($path);
         }

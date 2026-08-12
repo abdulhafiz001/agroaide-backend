@@ -9,6 +9,7 @@ use App\Services\ScanVerificationService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
@@ -40,8 +41,7 @@ class ProcessCropScan implements ShouldQueue
         $scan->update(['processing_state' => 'processing', 'processing_started_at' => now(), 'safe_error_code' => null]);
 
         try {
-            $bytes = Storage::disk('local')->get($scan->image_path);
-            $mime = Storage::disk('local')->mimeType($scan->image_path) ?: 'image/jpeg';
+            [$bytes, $mime] = $this->loadImageBytes($scan);
             $result = $diagnosis->diagnose(
                 "data:{$mime};base64,".base64_encode($bytes),
                 array_filter([
@@ -123,5 +123,31 @@ class ProcessCropScan implements ShouldQueue
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function loadImageBytes(FarmImageAnalysis $scan): array
+    {
+        if ($scan->image_url) {
+            $response = Http::timeout(30)->get($scan->image_url);
+            if (! $response->successful()) {
+                throw new \RuntimeException('Could not download scan image from Cloudinary.');
+            }
+            $bytes = $response->body();
+            $mime = $response->header('Content-Type') ?: 'image/jpeg';
+
+            return [$bytes, $mime];
+        }
+
+        if (! $scan->image_path) {
+            throw new \RuntimeException('Scan has no image path or Cloudinary URL.');
+        }
+
+        $bytes = Storage::disk('local')->get($scan->image_path);
+        $mime = Storage::disk('local')->mimeType($scan->image_path) ?: 'image/jpeg';
+
+        return [$bytes, $mime];
     }
 }

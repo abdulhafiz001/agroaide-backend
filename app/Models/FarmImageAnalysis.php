@@ -14,6 +14,8 @@ class FarmImageAnalysis extends Model
         'latitude',
         'longitude',
         'image_path',
+        'image_url',
+        'image_public_id',
         'condition',
         'disease_name',
         'result_json',

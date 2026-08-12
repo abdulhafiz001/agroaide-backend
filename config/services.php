@@ -90,4 +90,11 @@ return [
         'base_url' => env('MARKETEYE_BASE_URL', 'https://marketeye.ahzcode.sbs/api/v1/public'),
     ],
 
+    'cloudinary' => [
+        'cloud_name' => env('CLOUDINARY_CLOUD_NAME'),
+        'api_key' => env('CLOUDINARY_API_KEY'),
+        'api_secret' => env('CLOUDINARY_API_SECRET'),
+        'folder' => env('CLOUDINARY_FOLDER', 'agroaide/uploads'),
+    ],
+
 ];
