@@ -35,6 +35,7 @@ class User extends Authenticatable
         'preferred_language',
         'push_token',
         'notification_preferences',
+        'last_planting_prompt_on',
         'ai_response_depth',
         'ai_risk_tolerance',
     ];
@@ -53,6 +54,7 @@ class User extends Authenticatable
             'password' => 'hashed',
             'crops' => 'array',
             'notification_preferences' => 'array',
+            'last_planting_prompt_on' => 'date',
             'farm_size_m2' => 'float',
             'farm_latitude' => 'float',
             'farm_longitude' => 'float',

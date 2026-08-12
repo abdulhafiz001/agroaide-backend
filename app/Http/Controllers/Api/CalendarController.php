@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\CalendarTask;
 use App\Models\CropWatch;
+use App\Models\FarmField;
 use App\Models\PlantingReminder;
 use App\Models\User;
 use App\Services\SeasonalCalendarService;
@@ -82,6 +83,27 @@ class CalendarController extends Controller
                 'cropWatch' => true,
                 'crop' => $watch->crop,
             ];
+        }
+
+        // Harvest estimate windows (amber) — multi-day spread from planting date.
+        $harvestFields = FarmField::where('user_id', $user->id)
+            ->whereNotNull('harvest_start_date')
+            ->whereNotNull('harvest_end_date')
+            ->get(['id', 'crop', 'name', 'harvest_start_date', 'harvest_end_date']);
+
+        foreach ($harvestFields as $field) {
+            $start = Carbon::parse($field->harvest_start_date)->startOfDay();
+            $end = Carbon::parse($field->harvest_end_date)->startOfDay();
+            for ($day = $start->copy(); $day->lte($end); $day->addDay()) {
+                $date = $day->toDateString();
+                $markedDates[$date] = [
+                    'marked' => true,
+                    'dotColor' => '#ca8a04',
+                    'harvestWindow' => true,
+                    'crop' => $field->crop,
+                    'fieldId' => (string) $field->id,
+                ];
+            }
         }
 
         $dayTasks = $tasks->filter(fn ($t) => $t['scheduledDate'] === $selectedDate)->values();

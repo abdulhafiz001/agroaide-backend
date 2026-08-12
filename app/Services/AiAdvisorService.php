@@ -517,14 +517,20 @@ PROMPT;
 
         $lines = ['FARM FIELDS:'];
         foreach ($fields as $field) {
+            $planted = $field->planted_at?->toDateString() ?? 'unknown';
+            $harvest = ($field->harvest_start_date && $field->harvest_end_date)
+                ? $field->harvest_start_date->toDateString().' to '.$field->harvest_end_date->toDateString()
+                : 'not estimated yet';
             $lines[] = sprintf(
-                '- %s: crop=%s, area=%s m2, health=%s%%, moisture=%s%%, status=%s',
+                '- %s: crop=%s, area=%s m2, health=%s%%, moisture=%s%%, status=%s, planted_at=%s, harvest_window=%s',
                 $field->name ?? 'Field',
                 $field->crop ?? 'n/a',
                 $field->area_m2 ?? 'n/a',
                 $field->health_percentage ?? 'n/a',
                 $field->moisture_percentage ?? 'n/a',
                 $field->status ?? 'active',
+                $planted,
+                $harvest,
             );
         }
 

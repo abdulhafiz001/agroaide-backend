@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Services\DailyUsageLimitService;
 use App\Services\FarmImageAnalysisService;
 use App\Services\GeoAreaService;
+use App\Services\HarvestEstimateService;
 use App\Services\InputEstimateService;
 use App\Services\ScanVerificationService;
 use App\Support\MediaPayloadValidator;
@@ -29,6 +30,7 @@ class FarmController extends Controller
         private MediaPayloadValidator $mediaValidator,
         private ScanVerificationService $scanVerification,
         private DailyUsageLimitService $dailyLimits,
+        private HarvestEstimateService $harvestEstimate,
     ) {}
 
     public function overview(Request $request): JsonResponse
@@ -61,6 +63,8 @@ class FarmController extends Controller
                 'daysSincePlanting' => $f->days_since_planting,
                 'status' => $f->status,
                 'plantedAt' => $f->planted_at?->toIso8601String(),
+                'harvestStartDate' => $f->harvest_start_date?->toDateString(),
+                'harvestEndDate' => $f->harvest_end_date?->toDateString(),
                 'boundaryGeojson' => $f->boundary_geojson,
                 'hasMeasuredBoundary' => ! empty($f->boundary_geojson),
                 'totalExpense' => $totalExpense,
@@ -216,11 +220,16 @@ class FarmController extends Controller
         if (isset($validated['moisturePercentage'])) {
             $updateData['moisture_percentage'] = $validated['moisturePercentage'];
         }
-        if (isset($validated['plantedAt'])) {
-            $updateData['planted_at'] = $validated['plantedAt'];
+
+        if (! empty($updateData)) {
+            $field->update($updateData);
         }
 
-        $field->update($updateData);
+        if (! empty($validated['plantedAt'])) {
+            $field = $this->harvestEstimate->applyPlantedAt($field, $validated['plantedAt']);
+        }
+
+        $field->refresh();
 
         return response()->json([
             'message' => 'Field updated successfully.',
@@ -234,8 +243,64 @@ class FarmController extends Controller
                 'daysSincePlanting' => $field->days_since_planting,
                 'status' => $field->status,
                 'plantedAt' => $field->planted_at?->toIso8601String(),
+                'harvestStartDate' => $field->harvest_start_date?->toDateString(),
+                'harvestEndDate' => $field->harvest_end_date?->toDateString(),
                 'boundaryGeojson' => $field->boundary_geojson,
                 'hasMeasuredBoundary' => ! empty($field->boundary_geojson),
+            ],
+        ]);
+    }
+
+    public function plantingPrompt(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $today = now()->toDateString();
+        $alreadyPrompted = optional($user->last_planting_prompt_on)?->toDateString() === $today;
+        $fields = $this->harvestEstimate->fieldsNeedingPlantDate($user);
+
+        return response()->json([
+            'shouldPrompt' => ! $alreadyPrompted && count($fields) > 0,
+            'fields' => $fields,
+            'promptedOn' => optional($user->last_planting_prompt_on)?->toDateString(),
+        ]);
+    }
+
+    public function dismissPlantingPrompt(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $user->update(['last_planting_prompt_on' => now()->toDateString()]);
+
+        return response()->json(['ok' => true, 'promptedOn' => now()->toDateString()]);
+    }
+
+    public function recordPlantedAt(Request $request, int $fieldId): JsonResponse
+    {
+        $validated = $request->validate([
+            'plantedAt' => ['required', 'date', 'before_or_equal:today'],
+        ]);
+
+        $field = FarmField::where('user_id', $request->user()->id)
+            ->where('id', $fieldId)
+            ->firstOrFail();
+
+        $field = $this->harvestEstimate->applyPlantedAt($field, $validated['plantedAt']);
+
+        /** @var User $user */
+        $user = $request->user();
+        $user->update(['last_planting_prompt_on' => now()->toDateString()]);
+
+        return response()->json([
+            'message' => 'Planting date saved. Harvest estimate will be ready in a few hours.',
+            'field' => [
+                'id' => (string) $field->id,
+                'name' => $field->name,
+                'crop' => $field->crop,
+                'plantedAt' => $field->planted_at?->toIso8601String(),
+                'harvestStartDate' => $field->harvest_start_date?->toDateString(),
+                'harvestEndDate' => $field->harvest_end_date?->toDateString(),
+                'daysSincePlanting' => $field->days_since_planting,
             ],
         ]);
     }
@@ -292,6 +357,8 @@ class FarmController extends Controller
                 'daysSincePlanting' => $field->days_since_planting,
                 'status' => $field->status,
                 'plantedAt' => $field->planted_at?->toIso8601String(),
+                'harvestStartDate' => $field->harvest_start_date?->toDateString(),
+                'harvestEndDate' => $field->harvest_end_date?->toDateString(),
                 'boundaryGeojson' => $field->boundary_geojson,
                 'hasMeasuredBoundary' => ! empty($field->boundary_geojson),
                 'totalExpense' => $totalExpense,

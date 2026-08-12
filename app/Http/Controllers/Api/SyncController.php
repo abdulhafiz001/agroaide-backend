@@ -10,6 +10,7 @@ use App\Models\JournalEntry;
 use App\Models\SyncActionLog;
 use App\Models\User;
 use App\Services\GeoAreaService;
+use App\Services\HarvestEstimateService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Http\JsonResponse;
@@ -28,7 +29,10 @@ class SyncController extends Controller
         'boundary.update', 'boundary.delete',
     ];
 
-    public function __construct(private GeoAreaService $geoAreaService) {}
+    public function __construct(
+        private GeoAreaService $geoAreaService,
+        private HarvestEstimateService $harvestEstimate,
+    ) {}
 
     public function delta(Request $request): JsonResponse
     {
@@ -266,12 +270,21 @@ class SyncController extends Controller
         }
 
         $update = [];
-        foreach (['name' => 'name', 'crop' => 'crop', 'areaM2' => 'area_m2', 'status' => 'status', 'plantedAt' => 'planted_at', 'healthPercentage' => 'health_percentage', 'moisturePercentage' => 'moisture_percentage'] as $from => $to) {
+        $plantedAt = null;
+        foreach (['name' => 'name', 'crop' => 'crop', 'areaM2' => 'area_m2', 'status' => 'status', 'healthPercentage' => 'health_percentage', 'moisturePercentage' => 'moisture_percentage'] as $from => $to) {
             if (array_key_exists($from, $payload)) {
                 $update[$to] = $payload[$from];
             }
         }
-        $field->update($update);
+        if (array_key_exists('plantedAt', $payload) && ! empty($payload['plantedAt'])) {
+            $plantedAt = (string) $payload['plantedAt'];
+        }
+        if (! empty($update)) {
+            $field->update($update);
+        }
+        if ($plantedAt) {
+            $this->harvestEstimate->applyPlantedAt($field, $plantedAt);
+        }
 
         return ['status' => 'applied', 'entityId' => (string) $field->id];
     }

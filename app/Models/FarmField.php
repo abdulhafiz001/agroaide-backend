@@ -23,6 +23,11 @@ class FarmField extends Model
         'health_percentage',
         'moisture_percentage',
         'planted_at',
+        'harvest_start_date',
+        'harvest_end_date',
+        'planted_at_recorded_at',
+        'harvest_estimate_notified_at',
+        'harvest_reminder_sent_at',
         'status',
     ];
 
@@ -36,6 +41,11 @@ class FarmField extends Model
             'health_percentage' => 'integer',
             'moisture_percentage' => 'integer',
             'planted_at' => 'date',
+            'harvest_start_date' => 'date',
+            'harvest_end_date' => 'date',
+            'planted_at_recorded_at' => 'datetime',
+            'harvest_estimate_notified_at' => 'datetime',
+            'harvest_reminder_sent_at' => 'datetime',
         ];
     }
 

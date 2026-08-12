@@ -68,6 +68,17 @@ class FcmPushService
                             'sound' => 'default',
                         ],
                     ],
+                    'apns' => [
+                        'headers' => [
+                            'apns-priority' => '10',
+                        ],
+                        'payload' => [
+                            'aps' => [
+                                'sound' => 'default',
+                                'badge' => 1,
+                            ],
+                        ],
+                    ],
                 ],
             ];
 

@@ -43,6 +43,9 @@ Route::prefix('auth')->group(function (): void {
 
 Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void {
     Route::get('/farm/overview', [FarmController::class, 'overview']);
+    Route::get('/farm/planting-prompt', [FarmController::class, 'plantingPrompt']);
+    Route::post('/farm/planting-prompt/dismiss', [FarmController::class, 'dismissPlantingPrompt']);
+    Route::post('/farm/fields/{fieldId}/planted-at', [FarmController::class, 'recordPlantedAt']);
     Route::get('/farm/fields/{fieldId}', [FarmController::class, 'showField']);
     Route::post('/farm/fields', [FarmController::class, 'addField']);
     Route::put('/farm/fields/{fieldId}', [FarmController::class, 'updateField']);

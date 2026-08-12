@@ -30,13 +30,14 @@ class SendTaskReminders extends Command
 
         $sent = 0;
 
+        // Remind for ALL incomplete tasks today (not only the current period).
+        // Period filtering was too narrow — farmers missed reminders outside morning/afternoon windows.
         $todayTasks = CalendarTask::where('scheduled_date', $today)
-            ->where('period', $currentPeriod)
             ->where('completed', false)
             ->with('user')
             ->get();
 
-        $this->line("Found {$todayTasks->count()} task(s) for today/{$currentPeriod}.");
+        $this->line("Found {$todayTasks->count()} incomplete task(s) for today (period now={$currentPeriod}).");
 
         foreach ($todayTasks as $task) {
             if ($this->sendReminder($task, 'today')) {
@@ -61,11 +62,9 @@ class SendTaskReminders extends Command
         }
 
         if ($sent === 0) {
-            $this->warn('Sent 0 task reminder(s). Reminders only go out for:');
-            $this->warn("- Today's incomplete tasks matching the current period ({$currentPeriod}), and");
-            $this->warn('- Tomorrow\'s incomplete tasks when run in the evening (or with --include-tomorrow).');
+            $this->warn('Sent 0 task reminder(s). Check: incomplete tasks for today, user push_token, FCM credentials, and dedupe window (240m).');
             $this->warn('Tip: php artisan agroaide:send-task-reminders --include-tomorrow');
-            $this->warn('Or: php artisan agroaide:send-task-reminders --date=YYYY-MM-DD --period=morning');
+            $this->warn('Or: php artisan agroaide:diagnose-notifications --email=you@example.com --send-test');
         } else {
             $this->info("Sent {$sent} task reminder(s).");
         }
