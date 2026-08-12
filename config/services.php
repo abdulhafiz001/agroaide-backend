@@ -79,6 +79,10 @@ return [
         'credentials' => ($fcmPath = env('FCM_CREDENTIALS_PATH', 'firebase-service-account.json'))
             ? (str_starts_with($fcmPath, '/') ? $fcmPath : base_path($fcmPath))
             : base_path('firebase-service-account.json'),
+        // Coolify-friendly alternatives when the JSON file is not mounted into the image:
+        // paste the full service-account JSON, or base64-encode the file contents.
+        'credentials_json' => env('FCM_CREDENTIALS_JSON'),
+        'credentials_base64' => env('FCM_CREDENTIALS_BASE64'),
     ],
 
     'marketeye' => [

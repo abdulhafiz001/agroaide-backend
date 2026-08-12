@@ -19,15 +19,24 @@ class DiagnoseNotifications extends Command
         $this->info('AgroAide notification diagnostics');
         $this->newLine();
 
-        $projectId = config('services.fcm.project_id');
-        $credentialsPath = config('services.fcm.credentials');
-        $readable = is_string($credentialsPath) && is_readable($credentialsPath);
+        $status = $fcm->configurationStatus();
 
-        $this->line('FCM project id: '.($projectId ? 'set' : 'MISSING'));
-        $this->line('FCM credentials path: '.($credentialsPath ?: 'MISSING'));
-        $this->line('FCM credentials readable: '.($readable ? 'yes' : 'NO'));
+        $this->line('FCM project id: '.($status['projectIdSet'] ? 'set' : 'MISSING'));
+        $this->line('FCM credentials path: '.($status['path'] ?: 'MISSING'));
+        $this->line('FCM credentials path exists: '.($status['pathExists'] ? 'yes' : 'NO'));
+        $this->line('FCM credentials path readable: '.($status['pathReadable'] ? 'yes' : 'NO'));
+        $this->line('FCM_CREDENTIALS_JSON set: '.($status['jsonEnvSet'] ? 'yes' : 'no'));
+        $this->line('FCM_CREDENTIALS_BASE64 set: '.($status['base64EnvSet'] ? 'yes' : 'no'));
+        $this->line('FCM credentials source: '.$status['source']);
+        $this->line('FCM ready to send: '.($status['configured'] ? 'yes' : 'NO'));
+
+        if ($status['hint']) {
+            $this->newLine();
+            $this->warn($status['hint']);
+        }
 
         $withToken = User::query()->whereNotNull('push_token')->where('push_token', '!=', '')->count();
+        $this->newLine();
         $this->line("Users with push_token: {$withToken}");
 
         $this->newLine();
@@ -44,6 +53,18 @@ class DiagnoseNotifications extends Command
             'every 6h — agroaide:analyze-crop-watches',
         ] as $row) {
             $this->line(' - '.$row);
+        }
+
+        if (! $status['configured']) {
+            $this->newLine();
+            $this->error('FCM is not fully configured — pushes will stay as in-app inbox rows only.');
+            $this->line('Fastest Coolify fix:');
+            $this->line('  1) On your PC: base64 -w0 firebase-service-account.json   (or base64 -i on macOS)');
+            $this->line('  2) Coolify env: FCM_PROJECT_ID=agro-aide-c1595');
+            $this->line('  3) Coolify env: FCM_CREDENTIALS_BASE64=<paste the base64 string>');
+            $this->line('  4) Redeploy / restart the container, then re-run this command with --email=...');
+
+            return self::FAILURE;
         }
 
         $user = null;
@@ -78,13 +99,6 @@ class DiagnoseNotifications extends Command
         } else {
             $this->newLine();
             $this->comment('Tip: re-run with --email=farmer@example.com to send a live test push.');
-        }
-
-        if (! $projectId || ! $readable) {
-            $this->newLine();
-            $this->error('FCM is not fully configured. Set FCM_PROJECT_ID and mount a readable FCM_CREDENTIALS_PATH.');
-
-            return self::FAILURE;
         }
 
         $this->newLine();
