@@ -86,10 +86,11 @@ class DiagnoseNotifications extends Command
 
             if (empty($user->push_token)) {
                 $this->error("User #{$user->id} has no push_token.");
-                $this->line('Fix checklist:');
-                $this->line('  1) Install a NEW preview/production build (not Expo Go) that includes google-services.json');
-                $this->line('  2) Log in as this exact email, allow notifications, wait ~10s on dashboard');
-                $this->line('  3) Backend now accepts POST /api/auth/push-token without consent gate — redeploy API first');
+                $this->line('The device never reached POST /api/auth/push-token. Almost always the APK itself:');
+                $this->line('  1) The build must contain google-services.json. It is gitignored, so EAS drops it');
+                $this->line('     unless .easignore exists (it now does) or GOOGLE_SERVICES_JSON is set in EAS.');
+                $this->line('  2) Rebuild: eas build -p android --profile preview  (a rebuild is required — OTA is not enough)');
+                $this->line('  3) Install the new APK, log in, then open Settings → Push delivery and check the status there.');
                 $this->line('  4) Re-run: php artisan agroaide:diagnose-notifications --email='.$user->email);
 
                 return self::FAILURE;

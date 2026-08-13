@@ -523,16 +523,31 @@ PROMPT;
             }
 
             $folder = trim((string) config('services.cloudinary.folder', 'agroaide/uploads'), '/')."/farm-scans/{$user->id}";
-            $uploaded = $this->cloudinary->uploadBuffer($decoded, $folder, null, $mime);
+
+            if ($this->cloudinary->isConfigured()) {
+                $uploaded = $this->cloudinary->uploadBuffer($decoded, $folder, null, $mime);
+
+                return [
+                    // Keep a stable local-style path for older code paths / exports.
+                    'path' => 'cloudinary:'.$uploaded['public_id'],
+                    'url' => $uploaded['secure_url'],
+                    'public_id' => $uploaded['public_id'],
+                ];
+            }
+
+            // Tests / local environments without Cloudinary still persist the validated image.
+            $path = "farm-scans/{$user->id}/".uniqid('scan_', true).'.'.$extension;
+            if (! Storage::disk('local')->put($path, $decoded)) {
+                return null;
+            }
 
             return [
-                // Keep a stable local-style path for older code paths / exports.
-                'path' => 'cloudinary:'.$uploaded['public_id'],
-                'url' => $uploaded['secure_url'],
-                'public_id' => $uploaded['public_id'],
+                'path' => $path,
+                'url' => '',
+                'public_id' => '',
             ];
         } catch (\Exception $e) {
-            Log::warning('Failed to store scan image on Cloudinary', ['error' => $e->getMessage()]);
+            Log::warning('Failed to store scan image', ['error' => $e->getMessage()]);
 
             return null;
         }

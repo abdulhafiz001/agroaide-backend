@@ -40,6 +40,7 @@ class DiagnosisHardeningTest extends TestCase
         $user = User::factory()->create();
 
         $cloudinary = Mockery::mock(CloudinaryStorageService::class);
+        $cloudinary->shouldReceive('isConfigured')->andReturn(true);
         $cloudinary->shouldReceive('uploadBuffer')->once()->andReturn([
             'public_id' => 'agroaide/uploads/farm-scans/1/test-scan',
             'secure_url' => 'https://res.cloudinary.com/demo/image/upload/v1/agroaide/uploads/farm-scans/1/test-scan.png',
