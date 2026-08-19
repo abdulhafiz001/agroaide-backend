@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -13,11 +14,29 @@ class WeatherService
     private const CACHE_TTL = 3600; // 1 hour
 
     /**
+     * Live weather for this farmer's saved farm GPS. Never falls back to a city default.
+     */
+    public function getWeatherForUser(User $user): ?array
+    {
+        $coords = $user->farmCoordinates();
+        if ($coords === null) {
+            return null;
+        }
+
+        $weather = $this->getWeather($coords['latitude'], $coords['longitude']);
+        $weather['farmLatitude'] = $coords['latitude'];
+        $weather['farmLongitude'] = $coords['longitude'];
+        $weather['farmLocation'] = $coords['label'];
+
+        return $weather;
+    }
+
+    /**
      * Get full weather data for given coordinates.
      */
     public function getWeather(float $latitude, float $longitude): array
     {
-        // Round coords so tiny GPS jitter doesn't bust cache unnecessarily.
+        // Cache nearby GPS jitter (~100m) but still query Open-Meteo with the exact pin.
         $latKey = round($latitude, 3);
         $lngKey = round($longitude, 3);
         $cacheKey = "weather_{$latKey}_{$lngKey}";

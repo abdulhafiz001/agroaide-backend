@@ -7,7 +7,10 @@ use App\Models\User;
 
 class NotificationDispatcher
 {
-    public function __construct(private FcmPushService $fcm) {}
+    public function __construct(
+        private FcmPushService $fcm,
+        private LlmResponseCleaner $cleaner,
+    ) {}
 
     /**
      * Create an in-app notification and optionally send FCM push.
@@ -41,6 +44,8 @@ class NotificationDispatcher
             return null;
         }
 
+        $message = $this->cleaner->farmerFacing($message, $this->fallbackMessage($type, $data, $title));
+
         $notification = AppNotification::create([
             'user_id' => $user->id,
             'type' => $type,
@@ -53,7 +58,7 @@ class NotificationDispatcher
             $pushed = $this->fcm->sendToUser(
                 $user,
                 $title,
-                $message,
+                $this->pushBody($message),
                 array_merge($data, ['type' => $type, 'notificationId' => (string) $notification->id]),
             );
             if (! $pushed && ! empty($user->push_token)) {
@@ -114,5 +119,40 @@ class NotificationDispatcher
         }
 
         return $query->exists();
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function fallbackMessage(string $type, array $data, string $title): string
+    {
+        $crop = trim((string) ($data['crop'] ?? ''));
+        $place = trim((string) ($data['location'] ?? $data['farmLocation'] ?? ''));
+        $date = trim((string) ($data['bestPlantDate'] ?? $data['plantOn'] ?? ''));
+
+        return match ($type) {
+            'crop_watch_planting', 'planting_window' => trim(
+                ($crop !== '' ? "Good time to plant {$crop}" : $title)
+                .($place !== '' ? " around {$place}" : '')
+                .($date !== '' ? ". Best planting date: {$date}." : '.')
+            ),
+            'crop_watch_season_passed' => $crop !== ''
+                ? "The planting season for {$crop} has already passed for this year."
+                : $title,
+            'crop_watch_invalid' => $crop !== ''
+                ? "\"{$crop}\" does not look like a valid farm crop."
+                : $title,
+            default => $title !== '' ? $title : 'Open AgroAide for details.',
+        };
+    }
+
+    private function pushBody(string $message): string
+    {
+        $plain = trim(preg_replace('/\s+/', ' ', $message) ?? $message);
+        if (strlen($plain) <= 180) {
+            return $plain;
+        }
+
+        return rtrim(substr($plain, 0, 177)).'…';
     }
 }

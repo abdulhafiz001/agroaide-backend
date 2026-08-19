@@ -112,6 +112,31 @@ class User extends Authenticatable
         return $this->hasMany(UserConsent::class);
     }
 
+    public function hasFarmCoordinates(): bool
+    {
+        return $this->farm_latitude !== null && $this->farm_longitude !== null;
+    }
+
+    /**
+     * Exact farm GPS used for weather, planting windows, and location-aware alerts.
+     *
+     * @return array{latitude: float, longitude: float, label: string}|null
+     */
+    public function farmCoordinates(): ?array
+    {
+        if (! $this->hasFarmCoordinates()) {
+            return null;
+        }
+
+        $label = trim((string) ($this->farm_location ?: $this->farm_name ?: ''));
+
+        return [
+            'latitude' => (float) $this->farm_latitude,
+            'longitude' => (float) $this->farm_longitude,
+            'label' => $label !== '' ? $label : 'your farm',
+        ];
+    }
+
     public function isStaff(): bool
     {
         return in_array($this->role, ['agronomist', 'admin'], true);

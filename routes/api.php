@@ -107,6 +107,7 @@ Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void 
     Route::get('/dashboard/ai-insights', [DashboardController::class, 'aiInsights']);
     Route::get('/market/intel', [MarketController::class, 'intel']);
     Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/{id}', [NotificationController::class, 'show']);
     Route::patch('/notifications/{id}/read', [NotificationController::class, 'markRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);
 

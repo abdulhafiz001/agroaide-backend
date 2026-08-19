@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
 use App\Models\User;
+use App\Services\LlmResponseCleaner;
 use App\Services\NotificationDispatcher;
 use App\Services\WeatherService;
 use Illuminate\Http\JsonResponse;
@@ -15,6 +16,7 @@ class NotificationController extends Controller
     public function __construct(
         private WeatherService $weatherService,
         private NotificationDispatcher $dispatcher,
+        private LlmResponseCleaner $cleaner,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -28,15 +30,7 @@ class NotificationController extends Controller
             ->orderBy('created_at', 'desc')
             ->limit(50)
             ->get()
-            ->map(fn (AppNotification $n) => [
-                'id' => $n->id,
-                'type' => $n->type,
-                'title' => $n->title,
-                'message' => $n->message,
-                'read' => $n->read,
-                'createdAt' => $n->created_at->toIso8601String(),
-                'data' => $n->data,
-            ]);
+            ->map(fn (AppNotification $n) => $this->present($n));
 
         $unreadCount = $user->appNotifications()->where('read', false)->count();
 
@@ -44,6 +38,17 @@ class NotificationController extends Controller
             'notifications' => $notifications,
             'unreadCount' => $unreadCount,
         ]);
+    }
+
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $notification = AppNotification::where('user_id', $request->user()->id)
+            ->where('id', $id)
+            ->firstOrFail();
+
+        $notification->update(['read' => true]);
+
+        return response()->json(['notification' => $this->present($notification)]);
     }
 
     public function markRead(Request $request, int $id): JsonResponse
@@ -73,37 +78,39 @@ class NotificationController extends Controller
             return;
         }
 
-        if ($user->farm_latitude && $user->farm_longitude) {
+        $coords = $user->farmCoordinates();
+        if ($coords) {
             try {
-                $weather = $this->weatherService->getWeather(
-                    (float) $user->farm_latitude,
-                    (float) $user->farm_longitude,
-                );
+                $weather = $this->weatherService->getWeatherForUser($user);
+                if ($weather !== null) {
+                    foreach (($weather['alerts'] ?? []) as $alert) {
+                        if (($alert['severity'] ?? 'Low') === 'Low') {
+                            continue;
+                        }
 
-                foreach (($weather['alerts'] ?? []) as $alert) {
-                    if (($alert['severity'] ?? 'Low') === 'Low') {
-                        continue;
+                        $alertKey = $alert['alertKey'] ?? md5(($alert['title'] ?? '').'|'.($alert['advice'] ?? ''));
+
+                        // In-app backup only; push is handled by agroaide:send-weather-alerts
+                        $this->dispatcher->notify(
+                            $user,
+                            'weather',
+                            $alert['title'] ?? 'Weather alert',
+                            $this->weatherAdvice($alert['advice'] ?? 'Check today’s weather conditions for your farm.', $coords['label']),
+                            [
+                                'alertKey' => $alertKey,
+                                'severity' => $alert['severity'] ?? 'Moderate',
+                                'farmLatitude' => $coords['latitude'],
+                                'farmLongitude' => $coords['longitude'],
+                                'farmLocation' => $coords['label'],
+                            ],
+                            [
+                                'push' => false,
+                                'preference' => 'severeWeather',
+                                'dedupeMinutes' => 60 * 12,
+                                'dedupeKey' => 'alertKey',
+                            ],
+                        );
                     }
-
-                    $alertKey = $alert['alertKey'] ?? md5(($alert['title'] ?? '').'|'.($alert['advice'] ?? ''));
-
-                    // In-app backup only; push is handled by agroaide:send-weather-alerts
-                    $this->dispatcher->notify(
-                        $user,
-                        'weather',
-                        $alert['title'] ?? 'Weather alert',
-                        $alert['advice'] ?? 'Check today’s weather conditions for your farm.',
-                        [
-                            'alertKey' => $alertKey,
-                            'severity' => $alert['severity'] ?? 'Moderate',
-                        ],
-                        [
-                            'push' => false,
-                            'preference' => 'severeWeather',
-                            'dedupeMinutes' => 60 * 12,
-                            'dedupeKey' => 'alertKey',
-                        ],
-                    );
                 }
             } catch (\Exception $e) {
                 // silently skip
@@ -126,7 +133,7 @@ class NotificationController extends Controller
             );
         }
 
-        if ($upcomingTasks->isEmpty() && ! ($user->farm_latitude && $user->farm_longitude)) {
+        if ($upcomingTasks->isEmpty() && ! $user->hasFarmCoordinates()) {
             $this->dispatcher->notify(
                 $user,
                 'ai',
@@ -138,5 +145,39 @@ class NotificationController extends Controller
         }
 
         cache()->put($todayKey, true, 86400);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function present(AppNotification $notification): array
+    {
+        $clean = $this->cleaner->farmerFacing(
+            (string) $notification->message,
+            (string) ($notification->title ?: 'Open AgroAide for details.'),
+        );
+
+        if ($clean !== $notification->message) {
+            $notification->update(['message' => $clean]);
+        }
+
+        return [
+            'id' => $notification->id,
+            'type' => $notification->type,
+            'title' => $notification->title,
+            'message' => $clean,
+            'read' => $notification->read,
+            'createdAt' => $notification->created_at->toIso8601String(),
+            'data' => $notification->data,
+        ];
+    }
+
+    private function weatherAdvice(string $advice, string $place): string
+    {
+        if ($place === '' || str_contains($advice, $place)) {
+            return $advice;
+        }
+
+        return "At your farm near {$place}: {$advice}";
     }
 }

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\CropWatch;
 use App\Services\LlmChatClient;
+use App\Services\LlmResponseCleaner;
 use App\Services\NotificationDispatcher;
 use App\Services\SeasonalCalendarService;
 use App\Services\TranslationService;
@@ -20,6 +21,7 @@ class AnalyzeCropWatches extends Command
         private SeasonalCalendarService $seasonalCalendar,
         private NotificationDispatcher $dispatcher,
         private LlmChatClient $llm,
+        private LlmResponseCleaner $cleaner,
     ) {
         parent::__construct();
     }
@@ -243,21 +245,31 @@ class AnalyzeCropWatches extends Command
                 : "It is a good window to plant {$crop} around {$placeLabel}.",
         };
 
-        $prompt = "Write 2 short sentences for a Nigerian farmer in {$langName}. Kind={$kind}. Crop={$crop}. "
-            ."Farmer location (be specific, use this place name): {$placeLabel}. BestDate={$bestDate}. "
-            .'Mention the place name so they know the app knows where they farm. Do not invent other crops.';
+        $prompt = "Write exactly 2 short finished sentences in {$langName} for a Nigerian farmer. "
+            ."Crop: {$crop}. Place: {$placeLabel}. Situation: {$kind}. "
+            .($bestDate ? "Best planting date: {$bestDate}. " : '')
+            .'Name the place. Do not invent other crops.';
 
         try {
             $content = $this->llm->chat([
-                ['role' => 'system', 'content' => 'Short farming notifications only.'],
+                [
+                    'role' => 'system',
+                    'content' => 'You write short farm notifications. Reply with the 2 sentences only. '
+                        .'Never output thinking, analysis, tags, lists, or the words think/goal/kind.',
+                ],
                 ['role' => 'user', 'content' => $prompt],
             ], [
                 'timeout' => 12,
-                'max_tokens' => 120,
-                'temperature' => 0.4,
+                'max_tokens' => 80,
+                'temperature' => 0.3,
             ]);
 
-            return $content !== '' ? $content : $fallback;
+            $message = $this->cleaner->farmerFacing($content, $fallback);
+            if (strlen($message) > 420 || $this->cleaner->looksLikeReasoning($message)) {
+                return $fallback;
+            }
+
+            return $message;
         } catch (\Throwable $e) {
             return $fallback;
         }

@@ -12,7 +12,7 @@ class SendWeatherAlerts extends Command
 {
     protected $signature = 'agroaide:send-weather-alerts';
 
-    protected $description = 'Send FCM weather alerts for farms with GPS coordinates';
+    protected $description = 'Send FCM weather alerts using each farmer’s exact farm GPS';
 
     public function __construct(
         private WeatherService $weatherService,
@@ -31,17 +31,25 @@ class SendWeatherAlerts extends Command
         $sent = 0;
 
         foreach ($users as $user) {
+            $coords = $user->farmCoordinates();
+            if ($coords === null) {
+                continue;
+            }
+
             try {
-                $weather = $this->weatherService->getWeather(
-                    (float) $user->farm_latitude,
-                    (float) $user->farm_longitude,
-                );
+                $weather = $this->weatherService->getWeatherForUser($user);
             } catch (\Throwable $e) {
                 Log::warning('Weather alert fetch failed', [
                     'user_id' => $user->id,
+                    'latitude' => $coords['latitude'],
+                    'longitude' => $coords['longitude'],
                     'error' => $e->getMessage(),
                 ]);
 
+                continue;
+            }
+
+            if ($weather === null) {
                 continue;
             }
 
@@ -51,15 +59,22 @@ class SendWeatherAlerts extends Command
                 }
 
                 $alertKey = $alert['alertKey'] ?? md5(($alert['title'] ?? '').'|'.($alert['advice'] ?? ''));
+                $advice = (string) ($alert['advice'] ?? 'Check today’s weather conditions for your farm.');
+                if (! str_contains($advice, $coords['label'])) {
+                    $advice = "At your farm near {$coords['label']}: {$advice}";
+                }
 
                 $notification = $this->dispatcher->notify(
                     $user,
                     'weather',
                     $alert['title'] ?? 'Weather alert',
-                    $alert['advice'] ?? 'Check today’s weather conditions for your farm.',
+                    $advice,
                     [
                         'alertKey' => $alertKey,
                         'severity' => $alert['severity'] ?? 'Moderate',
+                        'farmLatitude' => $coords['latitude'],
+                        'farmLongitude' => $coords['longitude'],
+                        'farmLocation' => $coords['label'],
                     ],
                     [
                         'push' => true,

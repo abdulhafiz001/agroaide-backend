@@ -215,12 +215,9 @@ PROMPT],
         $rainToday = false;
         $rainTonight = false;
 
-        if ($user->farm_latitude && $user->farm_longitude) {
+        if ($user->hasFarmCoordinates()) {
             try {
-                $weather = $this->weatherService->getWeather(
-                    (float) $user->farm_latitude,
-                    (float) $user->farm_longitude,
-                );
+                $weather = $this->weatherService->getWeatherForUser($user) ?? [];
                 $current = $weather['current'] ?? [];
                 $condition = (string) ($current['condition'] ?? 'unknown');
                 $temp = $current['temperature'] ?? 'n/a';
@@ -448,15 +445,12 @@ PROMPT;
 
     private function buildWeatherContext(User $user): string
     {
-        if (! $user->farm_latitude || ! $user->farm_longitude) {
+        if (! $user->hasFarmCoordinates()) {
             return "WEATHER & SOIL:\n- No farm GPS coordinates saved. Ask the farmer to set farm location in Settings so you can use live weather.\n";
         }
 
         try {
-            $weather = $this->weatherService->getWeather(
-                (float) $user->farm_latitude,
-                (float) $user->farm_longitude,
-            );
+            $weather = $this->weatherService->getWeatherForUser($user) ?? [];
             $current = $weather['current'] ?? [];
             $temp = $current['temperature'] ?? 'n/a';
             $humidity = $current['humidity'] ?? 'n/a';

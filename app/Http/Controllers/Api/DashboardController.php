@@ -31,7 +31,7 @@ class DashboardController extends Controller
         $user = $request->user();
 
         $profileComplete = $this->isProfileComplete($user);
-        $hasLocation = $user->farm_latitude !== null && $user->farm_longitude !== null;
+        $hasLocation = $user->hasFarmCoordinates();
 
         $weatherAlert = null;
         $soilHealth = [];
@@ -40,11 +40,13 @@ class DashboardController extends Controller
         $outbreakAlerts = [];
 
         if ($hasLocation) {
-            $lat = (float) $user->farm_latitude;
-            $lng = (float) $user->farm_longitude;
+            $coords = $user->farmCoordinates();
+            $lat = $coords['latitude'] ?? 0;
+            $lng = $coords['longitude'] ?? 0;
 
             try {
-                $weather = $this->weatherService->getDashboardWeather($lat, $lng);
+                $weather = $this->weatherService->getWeatherForUser($user)
+                    ?? $this->weatherService->getDashboardWeather($lat, $lng);
             } catch (\Exception $e) {
                 $weather = [
                     'current' => [],
