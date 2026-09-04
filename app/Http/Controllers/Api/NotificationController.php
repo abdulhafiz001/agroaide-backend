@@ -123,11 +123,12 @@ class NotificationController extends Controller
             ->get();
 
         foreach ($upcomingTasks as $task) {
+            $cleanTitle = $this->cleaner->normalizeDashes($this->cleaner->stripInternalMetadata((string) $task->title));
             $this->dispatcher->notify(
                 $user,
                 'system',
-                'Task reminder: '.$task->title,
-                "You have a {$task->period} task scheduled today: {$task->title}.",
+                'Task reminder: '.$cleanTitle,
+                "You have a {$task->period} task scheduled today: {$cleanTitle}.",
                 ['taskId' => $task->id, 'period' => $task->period],
                 ['push' => false, 'dedupeMinutes' => 60 * 12, 'dedupeKey' => 'taskId'],
             );
@@ -157,15 +158,21 @@ class NotificationController extends Controller
             (string) ($notification->title ?: 'Open AgroAide for details.'),
         );
 
-        if ($clean !== $notification->message) {
-            $notification->update(['message' => $clean]);
+        $cleanTitle = $this->cleaner->normalizeDashes($this->cleaner->stripInternalMetadata((string) $notification->title));
+        $cleanMessage = $this->cleaner->normalizeDashes($this->cleaner->stripInternalMetadata($clean));
+
+        if ($cleanMessage !== $notification->message || $cleanTitle !== $notification->title) {
+            $notification->update([
+                'title' => $cleanTitle,
+                'message' => $cleanMessage,
+            ]);
         }
 
         return [
             'id' => $notification->id,
             'type' => $notification->type,
-            'title' => $notification->title,
-            'message' => $clean,
+            'title' => $cleanTitle,
+            'message' => $cleanMessage,
             'read' => $notification->read,
             'createdAt' => $notification->created_at->toIso8601String(),
             'data' => $notification->data,

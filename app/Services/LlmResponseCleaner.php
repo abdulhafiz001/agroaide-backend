@@ -35,6 +35,8 @@ class LlmResponseCleaner
         $cleaned = $this->stripReasoningBlocks($text);
         $cleaned = $this->stripThinkingPreamble($cleaned);
         $cleaned = $this->stripAnalysisBullets($cleaned);
+        $cleaned = $this->stripInternalMetadata($cleaned);
+        $cleaned = $this->normalizeDashes($cleaned);
         $cleaned = trim(preg_replace("/\n{3,}/", "\n\n", $cleaned) ?? $cleaned);
 
         if ($cleaned === '' || $this->looksLikeReasoning($cleaned)) {
@@ -47,8 +49,29 @@ class LlmResponseCleaner
     public function farmerFacing(string $text, string $fallback = ''): string
     {
         $cleaned = $this->clean($text);
+        if ($cleaned === '') {
+            $cleaned = $this->normalizeDashes($this->stripInternalMetadata($fallback));
+        }
 
-        return $cleaned !== '' ? $cleaned : $fallback;
+        return $cleaned;
+    }
+
+    public function stripInternalMetadata(string $text): string
+    {
+        $cleaned = preg_replace('/\[\s*harvest[-_]window(?::[^\]]*)?\]/i', '', $text) ?? $text;
+        $cleaned = preg_replace('/harvest[-_]window:fieldId?=\d+/i', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\[fieldId=\d+\]/i', '', $cleaned) ?? $cleaned;
+
+        return trim(preg_replace('/\s{2,}/', ' ', $cleaned) ?? $cleaned);
+    }
+
+    public function normalizeDashes(string $text): string
+    {
+        // Replace em-dashes and en-dashes with standard dashes / clean punctuation
+        $cleaned = str_replace(["\xE2\x80\x94", "\xE2\x80\x93", '—', '–'], '-', $text);
+        $cleaned = preg_replace('/(?<=\s)--(?=\s)/', '-', $cleaned) ?? $cleaned;
+
+        return trim(preg_replace('/\s{2,}/', ' ', $cleaned) ?? $cleaned);
     }
 
     public function looksLikeReasoning(string $text): bool

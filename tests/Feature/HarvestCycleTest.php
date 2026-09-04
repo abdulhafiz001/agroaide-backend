@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\CalendarTask;
 use App\Models\FarmField;
 use App\Models\User;
 use App\Models\UserConsent;
+use App\Services\HarvestEstimateService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -73,5 +75,55 @@ class HarvestCycleTest extends TestCase
         $rate->assertOk();
         $this->assertDatabaseHas('app_ratings', ['user_id' => $user->id, 'stars' => 5]);
         $this->assertSame('completed', $user->fresh()->app_rating_prompt_status);
+    }
+
+    public function test_harvest_notifications_and_tasks_are_clean_and_free_of_em_dashes_or_markers(): void
+    {
+        $user = $this->farmer();
+        $service = app(HarvestEstimateService::class);
+
+        $field = FarmField::create([
+            'user_id' => $user->id,
+            'name' => 'Plot 5',
+            'crop' => 'maize',
+            'area_m2' => 1000,
+            'status' => 'active',
+            'planted_at' => now()->subDays(99)->toDateString(),
+            'planted_at_recorded_at' => now()->subHours(6),
+        ]);
+
+        // Trigger estimate notification
+        $sentEstimates = $service->sendDueEstimateNotifications();
+        $this->assertSame(1, $sentEstimates);
+
+        $estimateNotification = $user->appNotifications()->where('type', 'harvest_estimate')->first();
+        $this->assertNotNull($estimateNotification);
+        $this->assertStringNotContainsString('—', $estimateNotification->message);
+        $this->assertStringNotContainsString('harvest-window:field', $estimateNotification->message);
+        $this->assertStringNotContainsString('fieldId=', $estimateNotification->message);
+        $this->assertStringContainsString('Plot 5', $estimateNotification->message);
+
+        // Check synced calendar tasks
+        $task = CalendarTask::where('user_id', $user->id)->first();
+        $this->assertNotNull($task);
+        $this->assertStringNotContainsString('—', $task->description);
+        $this->assertStringNotContainsString('harvest-window:field', $task->description);
+        $this->assertStringNotContainsString('fieldId=', $task->description);
+
+        // Set harvest start date to tomorrow and trigger reminder
+        $field->update([
+            'harvest_start_date' => now()->addDay()->toDateString(),
+            'harvest_end_date' => now()->addDays(5)->toDateString(),
+            'harvest_reminder_sent_at' => null,
+        ]);
+
+        $sentReminders = $service->sendDueHarvestReminders();
+        $this->assertSame(1, $sentReminders);
+
+        $reminderNotification = $user->appNotifications()->where('type', 'harvest_reminder')->first();
+        $this->assertNotNull($reminderNotification);
+        $this->assertStringNotContainsString('—', $reminderNotification->message);
+        $this->assertStringNotContainsString('harvest-window:field', $reminderNotification->message);
+        $this->assertStringNotContainsString('fieldId=', $reminderNotification->message);
     }
 }

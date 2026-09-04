@@ -30,8 +30,8 @@ class CalendarController extends Controller
             ->get()
             ->map(fn (CalendarTask $t) => [
                 'id' => (string) $t->id,
-                'title' => $t->title,
-                'description' => $t->description,
+                'title' => $this->cleanTaskText($t->title),
+                'description' => $this->cleanTaskText($t->description),
                 'scheduledDate' => $t->scheduled_date->toDateString(),
                 'period' => $t->period,
                 'durationMinutes' => $t->duration_minutes,
@@ -407,5 +407,19 @@ class CalendarController extends Controller
             'lastNotifiedOn' => $w->last_notified_on?->toDateString(),
             'createdAt' => $w->created_at?->toIso8601String(),
         ];
+    }
+
+    private function cleanTaskText(?string $text): string
+    {
+        if (! $text) {
+            return '';
+        }
+
+        $cleaned = preg_replace('/\[\s*harvest[-_]window(?::[^\]]*)?\]/i', '', $text) ?? $text;
+        $cleaned = preg_replace('/harvest[-_]window:fieldId?=\d+/i', '', $cleaned) ?? $cleaned;
+        $cleaned = str_replace(["\xE2\x80\x94", "\xE2\x80\x93", '—', '–'], '-', $cleaned);
+        $cleaned = preg_replace('/\s+/', ' ', $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 }

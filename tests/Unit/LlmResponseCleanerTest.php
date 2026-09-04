@@ -52,4 +52,15 @@ TEXT;
         $this->assertTrue($cleaner->looksLikeReasoning('1. **Deconstruct the Request:** Goal: write sentences'));
         $this->assertFalse($cleaner->looksLikeReasoning('Good time to plant tomato around Abuja. Best date is 1 September 2026.'));
     }
+
+    public function test_strips_technical_markers_and_normalizes_em_dashes(): void
+    {
+        $cleaner = new LlmResponseCleaner;
+        $raw = 'Best days to harvest this crop — not a single-day deadline. [harvest-window:fieldId=5]';
+        $cleaned = $cleaner->farmerFacing($raw, 'Fallback');
+
+        $this->assertStringNotContainsString('[harvest-window:fieldId=5]', $cleaned);
+        $this->assertStringNotContainsString('—', $cleaned);
+        $this->assertSame('Best days to harvest this crop - not a single-day deadline.', $cleaned);
+    }
 }

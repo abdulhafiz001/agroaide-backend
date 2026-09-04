@@ -79,17 +79,18 @@ class SendTaskReminders extends Command
             return false;
         }
 
-        $title = $kind === 'tomorrow'
-            ? "Task Reminder — Tomorrow: {$task->title}"
-            : "Task Reminder: {$task->title}";
+        $cleanTitle = $this->cleanTaskText($task->title);
+        $cleanDesc = $this->cleanTaskText($task->description);
 
-        $body = $kind === 'tomorrow'
-            ? ($task->description
-                ? "Reminder: {$task->description}"
-                : "Reminder: you have a {$task->period} farm task scheduled for tomorrow.")
-            : ($task->description
-                ? "Reminder: {$task->description}"
-                : "Reminder: don't forget your {$task->period} farm task today.");
+        $title = $kind === 'tomorrow'
+            ? "Task reminder (Tomorrow): {$cleanTitle}"
+            : "Task reminder: {$cleanTitle}";
+
+        $body = $cleanDesc !== ''
+            ? $cleanDesc
+            : ($kind === 'tomorrow'
+                ? "You have a {$task->period} farm task scheduled for tomorrow."
+                : "You have a {$task->period} farm task scheduled for today.");
 
         $notification = $this->dispatcher->notify(
             $user,
@@ -106,6 +107,20 @@ class SendTaskReminders extends Command
         );
 
         return (bool) $notification;
+    }
+
+    private function cleanTaskText(?string $text): string
+    {
+        if (! $text) {
+            return '';
+        }
+
+        $cleaned = preg_replace('/\[\s*harvest[-_]window(?::[^\]]*)?\]/i', '', $text) ?? $text;
+        $cleaned = preg_replace('/harvest[-_]window:fieldId?=\d+/i', '', $cleaned) ?? $cleaned;
+        $cleaned = str_replace(["\xE2\x80\x94", "\xE2\x80\x93", '—', '–'], '-', $cleaned);
+        $cleaned = preg_replace('/\s+/', ' ', $cleaned) ?? $cleaned;
+
+        return trim($cleaned);
     }
 
     private function shouldAutoIncludeTomorrow(): bool

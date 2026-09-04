@@ -118,7 +118,10 @@ class HarvestEstimateService
 
         $marker = "[harvest-window:fieldId={$field->id}]";
         CalendarTask::where('user_id', $field->user_id)
-            ->where('description', 'like', "%{$marker}%")
+            ->where(function ($q) use ($field, $marker) {
+                $q->where('description', 'like', "%{$marker}%")
+                    ->orWhere('client_uuid', 'like', "harvest_window_{$field->id}_%");
+            })
             ->delete();
     }
 
@@ -133,20 +136,20 @@ class HarvestEstimateService
 
         $start = Carbon::parse($field->harvest_start_date)->startOfDay();
         $end = Carbon::parse($field->harvest_end_date)->startOfDay();
-        $title = "Harvest window: {$field->crop}".($field->name ? " ({$field->name})" : '');
-        $marker = "[harvest-window:fieldId={$field->id}]";
+        $fieldName = trim((string) ($field->name ?: ''));
+        $title = "Harvest window: {$field->crop}".($fieldName !== '' ? " ({$fieldName})" : '');
 
         // Remove previous harvest-window tasks for this field
-        CalendarTask::where('user_id', $field->user_id)
-            ->where('description', 'like', "%{$marker}%")
-            ->delete();
+        $this->clearCalendarHarvestTasks($field);
 
         for ($day = $start->copy(); $day->lte($end); $day->addDay()) {
+            $dateStr = $day->toDateString();
             CalendarTask::create([
                 'user_id' => $field->user_id,
+                'client_uuid' => "harvest_window_{$field->id}_{$dateStr}",
                 'title' => $title,
-                'description' => "AI estimate based on your planting date. Best days to harvest this crop — not a single-day deadline. {$marker}",
-                'scheduled_date' => $day->toDateString(),
+                'description' => "Recommended harvest window based on your planting date. Monitor your field and harvest as your crop reaches peak maturity.",
+                'scheduled_date' => $dateStr,
                 'period' => 'morning',
                 'duration_minutes' => 60,
                 'impact' => 'high',
@@ -192,10 +195,11 @@ class HarvestEstimateService
 
             $startLabel = Carbon::parse($window['start'])->format('j M Y');
             $endLabel = Carbon::parse($window['end'])->format('j M Y');
+            $fieldName = trim((string) ($field->name ?: ''));
             $title = "Harvest estimate: {$field->crop}";
-            $message = "Based on when you planted {$field->crop}".($field->name ? " in {$field->name}" : '')
-                .", a good harvest window is about {$startLabel} to {$endLabel} (~{$window['offsetDays']} days after planting). "
-                .'We added those days to your calendar.';
+            $message = "Based on your planting date for {$field->crop}"
+                .($fieldName !== '' ? " in {$fieldName}" : '')
+                .", your estimated harvest window is between {$startLabel} and {$endLabel} (about {$window['offsetDays']} days after planting). These dates have been added to your calendar.";
 
             $notification = $this->dispatcher->notify(
                 $user,
@@ -224,7 +228,7 @@ class HarvestEstimateService
     }
 
     /**
-     * Day before harvest window starts — remind farmer.
+     * Day before harvest window starts - remind farmer.
      */
     public function sendDueHarvestReminders(): int
     {
@@ -248,12 +252,12 @@ class HarvestEstimateService
             $endLabel = $field->harvest_end_date
                 ? Carbon::parse($field->harvest_end_date)->format('j M Y')
                 : $startLabel;
+            $fieldName = trim((string) ($field->name ?: ''));
 
-            $title = "Harvest soon: {$field->crop}";
-            $message = "From tomorrow it is okay to start harvesting {$field->crop}"
-                .($field->name ? " ({$field->name})" : '')
-                .". Based on the planting date you entered, the estimated window is {$startLabel} to {$endLabel}. "
-                .'Open for advice from your personalized AI advisor.';
+            $title = "Harvest window opening: {$field->crop}";
+            $message = "Your {$field->crop}"
+                .($fieldName !== '' ? " in {$fieldName}" : '')
+                ." enters its recommended harvest window tomorrow, from {$startLabel} to {$endLabel}. Check your field and open AgroAide for harvest tips and market prices.";
 
             $notification = $this->dispatcher->notify(
                 $user,
@@ -337,13 +341,15 @@ class HarvestEstimateService
             if (! $user) {
                 continue;
             }
+            $fieldName = trim((string) ($field->name ?: ''));
+            $dateLabel = Carbon::parse($field->planned_plant_at)->format('j M Y');
             $n = $this->dispatcher->notify(
                 $user,
                 'next_plant_reminder',
                 "Plant {$field->planned_next_crop} in 2 days",
-                "Reminder: planting day for {$field->planned_next_crop}"
-                    .($field->name ? " on {$field->name}" : '')
-                    ." is {$field->planned_plant_at->toDateString()}. Prepare seed and land.",
+                "Reminder: your scheduled planting day for {$field->planned_next_crop}"
+                    .($fieldName !== '' ? " in {$fieldName}" : '')
+                    ." is on {$dateLabel}. Prepare your seeds and land.",
                 [
                     'fieldId' => (string) $field->id,
                     'crop' => $field->planned_next_crop,
@@ -372,13 +378,14 @@ class HarvestEstimateService
             if (! $user) {
                 continue;
             }
+            $fieldName = trim((string) ($field->name ?: ''));
             $n = $this->dispatcher->notify(
                 $user,
                 'next_plant_reminder',
                 "Plant {$field->planned_next_crop} today",
-                "Today is your planting day for {$field->planned_next_crop}"
-                    .($field->name ? " on {$field->name}" : '')
-                    .'. Open the field to record your planting date.',
+                "Today is your scheduled planting day for {$field->planned_next_crop}"
+                    .($fieldName !== '' ? " in {$fieldName}" : '')
+                    .". Open AgroAide to record your planting date.",
                 [
                     'fieldId' => (string) $field->id,
                     'crop' => $field->planned_next_crop,
