@@ -74,7 +74,7 @@ class HarvestEstimateService
     /**
      * @param  array{harvestedAt?:string,yieldNote?:?string,plannedNextCrop?:?string,plannedPlantAt?:?string}  $data
      */
-    public function markHarvested(FarmField $field, array $data): FarmField
+    public function markHarvested(FarmField $field, array $data, ?int $exceptTaskId = null): FarmField
     {
         $harvestedAt = Carbon::parse($data['harvestedAt'] ?? now()->toDateString())->toDateString();
 
@@ -94,7 +94,7 @@ class HarvestEstimateService
         }
 
         $field->save();
-        $this->clearCalendarHarvestTasks($field);
+        $this->clearCalendarHarvestTasks($field, $exceptTaskId);
 
         return $field->fresh();
     }
@@ -110,19 +110,24 @@ class HarvestEstimateService
         return $field->fresh();
     }
 
-    public function clearCalendarHarvestTasks(FarmField $field): void
+    public function clearCalendarHarvestTasks(FarmField $field, ?int $exceptTaskId = null): void
     {
         if (! $field->user_id) {
             return;
         }
 
         $marker = "[harvest-window:fieldId={$field->id}]";
-        CalendarTask::where('user_id', $field->user_id)
+        $query = CalendarTask::where('user_id', $field->user_id)
             ->where(function ($q) use ($field, $marker) {
                 $q->where('description', 'like', "%{$marker}%")
                     ->orWhere('client_uuid', 'like', "harvest_window_{$field->id}_%");
-            })
-            ->delete();
+            });
+
+        if ($exceptTaskId) {
+            $query->where('id', '!=', $exceptTaskId);
+        }
+
+        $query->delete();
     }
 
     /**

@@ -62,7 +62,7 @@ class SendTaskReminders extends Command
         }
 
         if ($sent === 0) {
-            $this->warn('Sent 0 task reminder(s). Check: incomplete tasks for today, user push_token, FCM credentials, and dedupe window (240m).');
+            $this->warn('Sent 0 task reminder(s). Check: incomplete tasks for today, user push_token, FCM credentials, and dedupe window (1440m).');
             $this->warn('Tip: php artisan agroaide:send-task-reminders --include-tomorrow');
             $this->warn('Or: php artisan agroaide:diagnose-notifications --email=you@example.com --send-test');
         } else {
@@ -103,7 +103,7 @@ class SendTaskReminders extends Command
                 'kind' => $kind,
                 'scheduledDate' => optional($task->scheduled_date)?->toDateString(),
             ],
-            ['push' => true, 'dedupeMinutes' => 240, 'dedupeKey' => 'taskId'],
+            ['push' => true, 'dedupeMinutes' => 1440, 'dedupeKey' => 'taskId'],
         );
 
         return (bool) $notification;
@@ -125,8 +125,7 @@ class SendTaskReminders extends Command
 
     private function shouldAutoIncludeTomorrow(): bool
     {
-        // Evening runs also preview tomorrow so farmers can prepare.
-        return (int) now()->format('H') >= 17;
+        return false;
     }
 
     private function getCurrentPeriod(): string

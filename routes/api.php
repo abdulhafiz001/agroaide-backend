@@ -86,7 +86,7 @@ Route::middleware(['auth:sanctum', 'consent.current'])->group(function (): void 
     Route::post('/calendar/tasks', [CalendarController::class, 'store']);
     Route::put('/calendar/tasks/{taskId}', [CalendarController::class, 'update']);
     Route::delete('/calendar/tasks/{taskId}', [CalendarController::class, 'destroy']);
-    Route::post('/calendar/tasks/{taskId}/complete', [CalendarController::class, 'completeTask']);
+    Route::match(['post', 'patch'], '/calendar/tasks/{taskId}/complete', [CalendarController::class, 'completeTask']);
     Route::get('/calendar/seasonal-suggestions', [CalendarController::class, 'seasonalSuggestions']);
     Route::get('/calendar/crop-watches', [CalendarController::class, 'listCropWatches']);
     Route::post('/calendar/crop-watches', [CalendarController::class, 'storeCropWatch']);

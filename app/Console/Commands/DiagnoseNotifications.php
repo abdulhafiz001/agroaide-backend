@@ -43,7 +43,7 @@ class DiagnoseNotifications extends Command
         $this->line('Expected scheduled notification jobs (see routes/console.php + supervisord schedule:work):');
         foreach ([
             'hourly — agroaide:detect-outbreaks',
-            'every 30m — agroaide:send-task-reminders',
+            'daily 07:00 — agroaide:send-task-reminders',
             'every 15m — agroaide:send-harvest-notifications',
             'every 30m — agroaide:send-planting-reminders',
             'every 2h — agroaide:send-weather-alerts',

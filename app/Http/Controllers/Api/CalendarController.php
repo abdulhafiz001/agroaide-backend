@@ -8,6 +8,7 @@ use App\Models\CropWatch;
 use App\Models\FarmField;
 use App\Models\PlantingReminder;
 use App\Models\User;
+use App\Services\HarvestEstimateService;
 use App\Services\SeasonalCalendarService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +16,10 @@ use Illuminate\Http\Request;
 
 class CalendarController extends Controller
 {
-    public function __construct(private SeasonalCalendarService $seasonalCalendar) {}
+    public function __construct(
+        private SeasonalCalendarService $seasonalCalendar,
+        private HarvestEstimateService $harvestEstimate,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -214,6 +218,7 @@ class CalendarController extends Controller
             'period' => ['nullable', 'in:morning,afternoon,evening'],
             'durationMinutes' => ['nullable', 'integer', 'min:5', 'max:480'],
             'impact' => ['nullable', 'in:low,medium,high'],
+            'completed' => ['nullable', 'boolean'],
         ]);
 
         $updateData = [];
@@ -235,8 +240,16 @@ class CalendarController extends Controller
         if (isset($validated['impact'])) {
             $updateData['impact'] = $validated['impact'];
         }
+        if (isset($validated['completed'])) {
+            $updateData['completed'] = (bool) $validated['completed'];
+            $updateData['completed_at'] = $validated['completed'] ? now() : null;
+        }
 
         $task->update($updateData);
+
+        if (! empty($updateData['completed'])) {
+            $this->handleHarvestTaskCompletion($task, $request->user());
+        }
 
         return response()->json(['message' => 'Task updated.']);
     }
@@ -257,17 +270,57 @@ class CalendarController extends Controller
             ->where('id', $taskId)
             ->firstOrFail();
 
-        $completed = $request->input('completed', true);
+        $completed = (bool) $request->input('completed', true);
         $task->update([
             'completed' => $completed,
             'completed_at' => $completed ? now() : null,
         ]);
 
+        $harvestUpdated = false;
+        if ($completed) {
+            $harvestUpdated = $this->handleHarvestTaskCompletion($task, $request->user());
+        }
+
         return response()->json([
             'taskId' => (string) $task->id,
             'completed' => $task->completed,
+            'harvestUpdated' => $harvestUpdated,
             'message' => $completed ? 'Task marked as complete.' : 'Task unmarked.',
         ]);
+    }
+
+    private function handleHarvestTaskCompletion(CalendarTask $task, User $user): bool
+    {
+        $fieldId = null;
+        if (! empty($task->client_uuid) && preg_match('/^harvest_window_(\d+)_/', $task->client_uuid, $m)) {
+            $fieldId = (int) $m[1];
+        } elseif (! empty($task->description) && preg_match('/harvest[-_]window:fieldId?=(\d+)/i', $task->description, $m)) {
+            $fieldId = (int) $m[1];
+        }
+
+        $field = null;
+        if ($fieldId) {
+            $field = FarmField::where('user_id', $user->id)->find($fieldId);
+        }
+
+        if (! $field && str_starts_with(strtolower($task->title), 'harvest window')) {
+            $field = FarmField::where('user_id', $user->id)
+                ->where('status', 'active')
+                ->whereNull('harvested_at')
+                ->whereNotNull('harvest_start_date')
+                ->first();
+        }
+
+        if ($field && ! $field->harvested_at) {
+            $harvestDate = $task->scheduled_date ? $task->scheduled_date->toDateString() : now()->toDateString();
+            $this->harvestEstimate->markHarvested($field, [
+                'harvestedAt' => $harvestDate,
+            ], $task->id);
+
+            return true;
+        }
+
+        return false;
     }
 
     public function seasonalSuggestions(Request $request): JsonResponse

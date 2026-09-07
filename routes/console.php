@@ -9,7 +9,7 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('agroaide:detect-outbreaks')->hourly();
-Schedule::command('agroaide:send-task-reminders')->everyThirtyMinutes();
+Schedule::command('agroaide:send-task-reminders')->dailyAt('07:00');
 Schedule::command('agroaide:send-harvest-notifications')->everyFifteenMinutes();
 Schedule::command('agroaide:send-weather-alerts')->everyTwoHours();
 Schedule::command('agroaide:send-daily-ai-insights')->dailyAt('06:30');

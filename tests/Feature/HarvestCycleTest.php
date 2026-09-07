@@ -126,4 +126,62 @@ class HarvestCycleTest extends TestCase
         $this->assertStringNotContainsString('harvest-window:field', $reminderNotification->message);
         $this->assertStringNotContainsString('fieldId=', $reminderNotification->message);
     }
+
+    public function test_completing_harvest_calendar_task_marks_field_as_harvested_and_stops_reminders(): void
+    {
+        $user = $this->farmer();
+        Sanctum::actingAs($user);
+
+        $service = app(HarvestEstimateService::class);
+
+        $field = FarmField::create([
+            'user_id' => $user->id,
+            'name' => 'North Field',
+            'crop' => 'maize',
+            'area_m2' => 800,
+            'status' => 'active',
+            'planted_at' => now()->subDays(80)->toDateString(),
+            'harvest_start_date' => now()->toDateString(),
+            'harvest_end_date' => now()->addDays(4)->toDateString(),
+        ]);
+
+        // Sync calendar tasks for 5 days of harvest window
+        $service->syncCalendarHarvestTasks($field);
+
+        $tasks = CalendarTask::where('user_id', $user->id)
+            ->where('client_uuid', 'like', "harvest_window_{$field->id}_%")
+            ->get();
+        $this->assertCount(5, $tasks);
+
+        $todayTask = $tasks->firstWhere('scheduled_date', now()->startOfDay());
+        $this->assertNotNull($todayTask);
+
+        // Complete today's harvest task via API
+        $res = $this->postJson("/api/calendar/tasks/{$todayTask->id}/complete", [
+            'completed' => true,
+        ]);
+
+        $res->assertOk()
+            ->assertJsonPath('completed', true)
+            ->assertJsonPath('harvestUpdated', true);
+
+        // Field should now be marked as harvested (fallow)
+        $field->refresh();
+        $this->assertSame('fallow', $field->status);
+        $this->assertSame(now()->toDateString(), $field->harvested_at?->toDateString());
+        $this->assertNull($field->harvest_start_date);
+        $this->assertNull($field->harvest_end_date);
+
+        // Remaining 4 future harvest window tasks should be removed from calendar
+        $remainingTasks = CalendarTask::where('user_id', $user->id)
+            ->where('client_uuid', 'like', "harvest_window_{$field->id}_%")
+            ->get();
+        $this->assertCount(1, $remainingTasks);
+        $this->assertSame($todayTask->id, $remainingTasks->first()->id);
+        $this->assertTrue($remainingTasks->first()->completed);
+
+        // Attempting to send harvest reminders should send 0 because field is harvested
+        $remindersSent = $service->sendDueHarvestReminders();
+        $this->assertSame(0, $remindersSent);
+    }
 }
