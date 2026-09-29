@@ -1,9 +1,19 @@
-Hi {{ $name }},
+Hello {{ $name }},
 
-Your AgroAide recovery code is: {{ $code }}
+We received a request to reset your AgroAide account password.
 
-It expires in {{ $expiresInMinutes }} minutes. Enter it in the app to set a new password.
+Your one-time recovery code is:
+{{ $code }}
 
-If you didn’t request this, ignore this email.
+This code expires in {{ $expiresInMinutes }} minutes.
 
-— The AgroAide team
+How to reset your password:
+1. Open the AgroAide app on your device.
+2. Enter the 6-digit code above.
+3. Choose your new password.
+
+If you didn't request a password reset, you can safely ignore this email. Your password will not change until this code is submitted in the app.
+
+— The AgroAide Security Team
+
+Security notice: AgroAide will never ask for your recovery code via phone call or SMS.

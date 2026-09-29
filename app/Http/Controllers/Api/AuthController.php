@@ -3,12 +3,16 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\EmailVerificationCodeMail;
 use App\Mail\PasswordResetCodeMail;
 use App\Mail\WelcomeMail;
+use App\Models\EmailVerificationOtp;
 use App\Models\PasswordResetOtp;
 use App\Models\User;
 use App\Models\UserConsent;
+use App\Rules\ValidPersonName;
 use App\Services\AiAdvisorService;
+use App\Support\PersonName;
 use App\Support\PhoneNumber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,7 +32,7 @@ class AuthController extends Controller
     public function register(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'fullName' => ['required', 'string', 'max:255'],
+            'fullName' => ['required', 'string', 'max:255', new ValidPersonName],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'confirmed', Password::min(8)->letters()->numbers()],
             'phoneNumber' => ['nullable', 'string', 'max:32'],
@@ -53,7 +57,7 @@ class AuthController extends Controller
         }
 
         $user = User::create([
-            'name' => $validated['fullName'],
+            'name' => PersonName::normalize($validated['fullName']),
             'email' => $validated['email'],
             'password' => Hash::make($validated['password']),
             'role' => 'farmer',
@@ -89,6 +93,12 @@ class AuthController extends Controller
             Mail::to($user->email)->send(new WelcomeMail($user));
         } catch (\Throwable) {
             // Registration should still succeed if mail delivery fails.
+        }
+
+        try {
+            $this->issueAndSendEmailVerificationOtp($user, (string) $request->ip());
+        } catch (\Throwable) {
+            // Registration should still succeed if verification mail delivery fails.
         }
 
         return response()->json([
@@ -172,7 +182,7 @@ class AuthController extends Controller
         $user = $request->user();
 
         $validated = $request->validate([
-            'fullName' => ['nullable', 'string', 'max:255'],
+            'fullName' => ['nullable', 'string', 'max:255', new ValidPersonName],
             'email' => ['nullable', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'phoneNumber' => ['nullable', 'string', 'max:32'],
             'farmName' => ['nullable', 'string', 'max:255'],
@@ -199,10 +209,13 @@ class AuthController extends Controller
 
         $updateData = [];
         if (isset($validated['fullName'])) {
-            $updateData['name'] = $validated['fullName'];
+            $updateData['name'] = PersonName::normalize($validated['fullName']);
         }
         if (isset($validated['email'])) {
-            $updateData['email'] = $validated['email'];
+            if (strtolower(trim($validated['email'])) !== strtolower((string) $user->email)) {
+                $updateData['email'] = $validated['email'];
+                $updateData['email_verified_at'] = null;
+            }
         }
         if (array_key_exists('phoneNumber', $validated)) {
             $normalizedPhone = filled($validated['phoneNumber']) ? PhoneNumber::normalize($validated['phoneNumber']) : null;
@@ -262,7 +275,7 @@ class AuthController extends Controller
             $updateData['notification_preferences'] = $merged;
         }
 
-        $user->update($updateData);
+        $user->forceFill($updateData)->save();
         $user->refresh();
 
         return response()->json([
@@ -398,6 +411,123 @@ class AuthController extends Controller
         ]);
     }
 
+    public function sendEmailVerificationCode(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        if (filled($user->email_verified_at)) {
+            return response()->json([
+                'message' => 'Email is already verified.',
+                'alreadyVerified' => true,
+            ]);
+        }
+
+        $rateKey = 'email-verify-send:'.$user->id;
+        if (RateLimiter::tooManyAttempts($rateKey, 3)) {
+            $seconds = RateLimiter::availableIn($rateKey);
+
+            return response()->json([
+                'message' => "Too many verification requests. Please try again in {$seconds} seconds.",
+            ], 429);
+        }
+        RateLimiter::hit($rateKey, 180);
+
+        try {
+            $this->issueAndSendEmailVerificationOtp($user, (string) $request->ip());
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Unable to send verification email. Please check your mail connection and try again.',
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => 'A 6-digit verification code has been sent to your email address.',
+        ]);
+    }
+
+    public function verifyEmailWithCode(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'code' => ['required', 'string', 'size:6'],
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        if (filled($user->email_verified_at)) {
+            return response()->json([
+                'message' => 'Email is already verified.',
+                'profile' => $this->transformUserProfile($user),
+            ]);
+        }
+
+        $rateKey = 'email-verify-attempt:'.$user->id;
+        if (RateLimiter::tooManyAttempts($rateKey, 10)) {
+            $seconds = RateLimiter::availableIn($rateKey);
+
+            return response()->json([
+                'message' => "Too many verification attempts. Please try again in {$seconds} seconds.",
+            ], 429);
+        }
+        RateLimiter::hit($rateKey, 300);
+
+        /** @var EmailVerificationOtp|null $otp */
+        $otp = EmailVerificationOtp::where('user_id', $user->id)
+            ->latest('id')
+            ->first();
+
+        if (! $otp || $otp->expires_at->isPast()) {
+            throw ValidationException::withMessages([
+                'code' => ['Invalid or expired verification code. Please request a new one.'],
+            ]);
+        }
+
+        if ($otp->attempts >= self::OTP_MAX_ATTEMPTS) {
+            $otp->delete();
+            throw ValidationException::withMessages([
+                'code' => ['Too many invalid attempts. Please request a new verification code.'],
+            ]);
+        }
+
+        if (! Hash::check($validated['code'], $otp->code_hash)) {
+            $otp->increment('attempts');
+            throw ValidationException::withMessages([
+                'code' => ['The verification code is incorrect.'],
+            ]);
+        }
+
+        $user->forceFill(['email_verified_at' => now()])->save();
+        $otp->delete();
+        EmailVerificationOtp::where('user_id', $user->id)->delete();
+        RateLimiter::clear($rateKey);
+
+        return response()->json([
+            'message' => 'Email verified successfully.',
+            'profile' => $this->transformUserProfile($user->fresh()),
+        ]);
+    }
+
+    private function issueAndSendEmailVerificationOtp(User $user, ?string $ip = null): void
+    {
+        if (blank($user->email)) {
+            return;
+        }
+
+        $code = (string) random_int(100000, 999999);
+
+        EmailVerificationOtp::where('user_id', $user->id)->delete();
+        EmailVerificationOtp::create([
+            'user_id' => $user->id,
+            'code_hash' => Hash::make($code),
+            'expires_at' => now()->addMinutes(self::OTP_TTL_MINUTES),
+            'attempts' => 0,
+            'request_ip' => $ip,
+        ]);
+
+        Mail::to($user->email)->send(new EmailVerificationCodeMail($user, $code, self::OTP_TTL_MINUTES));
+    }
+
     private function findUserByIdentifier(string $identifier): ?User
     {
         if ($identifier === '') {
@@ -422,6 +552,8 @@ class AuthController extends Controller
             'id' => (string) $user->id,
             'fullName' => $user->name,
             'email' => $user->email,
+            'emailVerified' => filled($user->email_verified_at),
+            'emailVerifiedAt' => $user->email_verified_at?->toIso8601String(),
             'phoneNumber' => $user->phone_number ?? '',
             'farmName' => $user->farm_name ?? 'My Farm',
             'farmLocation' => $user->farm_location ?? 'Unknown location',

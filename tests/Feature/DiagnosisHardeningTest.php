@@ -21,7 +21,7 @@ class DiagnosisHardeningTest extends TestCase
     public function test_mobile_registration_cannot_create_staff(): void
     {
         $response = $this->postJson('/api/auth/register', [
-            'fullName' => 'Farmer',
+            'fullName' => 'Test Farmer',
             'email' => 'farmer@example.test',
             'password' => 'password123',
             'password_confirmation' => 'password123',

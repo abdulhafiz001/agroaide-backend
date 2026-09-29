@@ -37,6 +37,8 @@ Route::prefix('auth')->group(function (): void {
         Route::put('/profile', [AuthController::class, 'updateProfile'])->middleware('consent.current');
         // Push token must work even when legal re-consent is pending (428 on /profile).
         Route::post('/push-token', [AuthController::class, 'registerPushToken']);
+        Route::post('/email/send-code', [AuthController::class, 'sendEmailVerificationCode']);
+        Route::post('/email/verify', [AuthController::class, 'verifyEmailWithCode']);
         Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('consent.current');
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::post('/consent', [LegalController::class, 'consent']);

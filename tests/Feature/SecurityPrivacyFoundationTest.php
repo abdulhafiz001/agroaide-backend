@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\EmailVerificationOtp;
 use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\PasswordResetOtp;
@@ -184,7 +185,16 @@ class SecurityPrivacyFoundationTest extends TestCase
         ]);
         $old->forceFill(['created_at' => now()->subDays(2), 'updated_at' => now()->subDays(2)])->save();
 
+        $oldVerify = EmailVerificationOtp::create([
+            'user_id' => $user->id,
+            'code_hash' => 'hash_verify',
+            'expires_at' => now()->subDays(2),
+            'attempts' => 0,
+        ]);
+        $oldVerify->forceFill(['created_at' => now()->subDays(2), 'updated_at' => now()->subDays(2)])->save();
+
         $this->artisan('agroaide:purge-expired-personal-data')->assertSuccessful();
         $this->assertDatabaseMissing('password_reset_otps', ['id' => $old->id]);
+        $this->assertDatabaseMissing('email_verification_otps', ['id' => $oldVerify->id]);
     }
 }

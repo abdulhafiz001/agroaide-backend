@@ -1,13 +1,17 @@
-Hi {{ $name }},
+Hello {{ $name }},
 
-Welcome to AgroAide — your farm companion for smarter growing, faster decisions, and seasonal readiness.
+Welcome to AgroAide — your dedicated farm intelligence partner. Your account is ready to use immediately.
 
-What you can do in the app:
-- Weather & soil for your farm — forecasts tied to your exact location
-- Nearby disease detection — when farmers within 5km scan the same crop and AI finds a disease that can affect yours, you get an early warning with prevention tips (and an outbreak alert if many reports pile up)
-- AI farm advisor — practical guidance with your farm context
-- Market & calendar tools — plan tasks and track your farm
+Key tools available in your account:
+- Hyperlocal Weather & Soil Moisture: 7-day forecasts and soil metrics anchored to your farm's exact GPS location.
+- 5km Disease Outbreak Radar: Early warnings when nearby farmers detect crop infections before spores reach your plots.
+- AI Agronomy Advisor: Direct agronomic assistance tailored to your specific crops, soil, and field tasks.
+- Field Lifecycle & Harvest Planner: Automated planting windows and morning task reminders from seed to harvest.
 
-Open the app and finish your farm profile (crops + location) so alerts can protect your fields.
+Recommended Next Step:
+Open the AgroAide app and verify your farm location GPS and crop list so your alerts accurately protect your land.
 
-— The AgroAide team
+Wishing you a bountiful season,
+The AgroAide Agronomy & Engineering Team
+
+Security notice: AgroAide will never ask for your account password or recovery codes via phone call or SMS.

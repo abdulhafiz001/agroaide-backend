@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\AdvisorConversation;
 use App\Models\AppNotification;
+use App\Models\EmailVerificationOtp;
 use App\Models\PasswordResetOtp;
 use App\Models\SyncActionLog;
 use Illuminate\Console\Command;
@@ -19,6 +20,7 @@ class PurgeExpiredPersonalData extends Command
     {
         $days = config('security.retention_days');
         PasswordResetOtp::where('created_at', '<', now()->subDays($days['otps']))->delete();
+        EmailVerificationOtp::where('created_at', '<', now()->subDays($days['otps']))->delete();
         SyncActionLog::where('created_at', '<', now()->subDays($days['sync_payload_logs']))->delete();
         AdvisorConversation::where('created_at', '<', now()->subDays($days['conversations']))->delete();
         AppNotification::where('created_at', '<', now()->subDays($days['notifications']))->delete();
