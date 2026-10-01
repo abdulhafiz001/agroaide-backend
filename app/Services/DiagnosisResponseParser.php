@@ -97,7 +97,7 @@ class DiagnosisResponseParser
             $disease = null;
         }
 
-        if (in_array($condition, ['healthy', 'good'], true)) {
+        if (in_array($condition, ['healthy', 'good', 'inconclusive'], true)) {
             $disease = null;
         }
 
@@ -107,9 +107,11 @@ class DiagnosisResponseParser
         }
         $immediate = $this->stringList($recommendations['immediate'] ?? []);
         if ($immediate === []) {
-            $immediate = $condition === 'healthy' || $condition === 'good'
-                ? ['Continue regular monitoring', 'Maintain current watering and nutrient schedule']
-                : ['Take a clearer close-up of affected leaves', 'Consult a local extension officer if symptoms worsen'];
+            $immediate = match ($condition) {
+                'healthy', 'good' => ['Continue regular monitoring', 'Maintain current watering and nutrient schedule'],
+                'inconclusive' => ['Retake photo in even, indirect daylight', 'Focus closely on a single leaf avoiding shadows and glare'],
+                default => ['Take a clearer close-up of affected leaves', 'Consult a local extension officer if symptoms worsen'],
+            };
         }
 
         $details = $parsed['details'] ?? null;
@@ -295,6 +297,9 @@ class DiagnosisResponseParser
             'critical' => 'critical',
             'severe' => 'critical',
             'unknown' => 'unknown',
+            'inconclusive' => 'inconclusive',
+            'uncertain' => 'inconclusive',
+            'unclear' => 'inconclusive',
         ];
 
         return $map[$condition] ?? 'unknown';

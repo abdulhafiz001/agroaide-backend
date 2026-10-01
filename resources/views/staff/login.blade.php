@@ -10,12 +10,8 @@
 <main class="mx-auto flex min-h-screen max-w-md items-center px-5 py-8">
     <form method="post" action="{{ route('staff.authenticate') }}" class="w-full rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
         @csrf
-        <div class="flex items-center gap-2">
-            <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-100 text-emerald-800">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L4 5V11.09C4 16.14 7.41 20.85 12 22C16.59 20.85 20 16.14 20 11.09V5L12 2Z"/>
-                </svg>
-            </div>
+        <div class="flex items-center gap-2.5">
+            <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide" class="h-8 w-8 rounded-lg object-contain">
             <p class="text-sm font-semibold uppercase tracking-widest text-emerald-700">AgroAide</p>
         </div>
         <h1 class="mt-3 text-2xl font-bold text-stone-900">Staff sign in</h1>

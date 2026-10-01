@@ -7,6 +7,7 @@ use App\Models\CanonicalLabel;
 use App\Models\ConfidencePolicy;
 use App\Models\EvaluationDataset;
 use App\Models\EvaluationRun;
+use App\Models\FarmField;
 use App\Models\FarmImageAnalysis;
 use App\Models\ModelVersion;
 use App\Models\PromptVersion;
@@ -107,41 +108,98 @@ class StaffController extends Controller
             ? data_get(json_decode($latestRun->metrics, true), 'accuracy')
             : null;
 
+        $registeredFarmers = User::where('role', 'farmer')->count();
+        $activeFarmCount = $this->activeFarmCount();
+        $totalScans = FarmImageAnalysis::count();
         $pendingScans = FarmImageAnalysis::whereIn('verification_state', ['pending_review', 'disputed'])->count();
-
+        $monitoredFields = FarmField::count();
         $outbreakCount = DB::table('outbreak_events')->where('distinct_farmer_count', '>=', 3)->count();
-
-        $feedbackCount = DB::table('scan_feedback')
-            ->where('created_at', '>=', now()->subDays(7))
-            ->count();
+        $feedbackCount = DB::table('scan_feedback')->count();
 
         $recentScans = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
             ->select(['id', 'farm_field_id', 'predicted_disease_label_id', 'disease_name', 'normalized_confidence', 'verification_state', 'created_at'])
-            ->whereIn('verification_state', ['pending_review', 'disputed'])
             ->latest()
-            ->limit(5)
+            ->limit(6)
             ->get();
 
-        $activeFarmCount = $this->activeFarmCount();
+        // 30-day activity trends for charts
+        $cutoff = now()->subDays(29)->startOfDay();
+
+        $userRegistrations = DB::table('users')
+            ->where('role', 'farmer')
+            ->where('created_at', '>=', $cutoff)
+            ->selectRaw('DATE(created_at) as date_val, count(*) as total')
+            ->groupBy('date_val')
+            ->pluck('total', 'date_val');
+
+        $dailyScans = DB::table('farm_image_analyses')
+            ->where('created_at', '>=', $cutoff)
+            ->selectRaw('DATE(created_at) as date_val, count(*) as total')
+            ->groupBy('date_val')
+            ->pluck('total', 'date_val');
+
+        $chartLabels = [];
+        $chartUserCounts = [];
+        $chartScanCounts = [];
+
+        for ($i = 29; $i >= 0; $i--) {
+            $date = now()->subDays($i);
+            $key = $date->format('Y-m-d');
+            $chartLabels[] = $date->format('M j');
+            $chartUserCounts[] = (int) ($userRegistrations[$key] ?? 0);
+            $chartScanCounts[] = (int) ($dailyScans[$key] ?? 0);
+        }
 
         return view('staff.dashboard', compact(
-            'latestAccuracy', 'pendingScans', 'outbreakCount', 'feedbackCount',
+            'latestAccuracy', 'pendingScans', 'totalScans', 'registeredFarmers',
+            'monitoredFields', 'outbreakCount', 'feedbackCount',
             'recentScans', 'activeFarmCount',
+            'chartLabels', 'chartUserCounts', 'chartScanCounts'
         ));
     }
 
     // ─── Scan review ───────────────────────────────────────────────────────
 
-    public function scans(): View
+    public function scans(Request $request): View
     {
-        $queue = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
+        $query = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
             ->select(['id', 'farm_field_id', 'predicted_disease_label_id', 'disease_name',
-                'normalized_confidence', 'verification_state', 'created_at'])
-            ->whereIn('verification_state', ['pending_review', 'disputed'])
-            ->latest()
-            ->paginate(24);
+                'normalized_confidence', 'verification_state', 'created_at']);
 
-        return view('staff.scans.index', compact('queue'));
+        $status = $request->input('status', 'pending');
+
+        match ($status) {
+            'pending' => $query->whereIn('verification_state', ['pending_review', 'disputed']),
+            'verified' => $query->where('verification_state', 'expert_verified'),
+            'rejected' => $query->where('verification_state', 'expert_rejected'),
+            'disputed' => $query->where('verification_state', 'disputed'),
+            'all' => null,
+            default => $query->whereIn('verification_state', ['pending_review', 'disputed']),
+        };
+
+        if ($search = trim((string) $request->input('search'))) {
+            if (is_numeric($search)) {
+                $query->where('id', (int) $search);
+            } else {
+                $query->where(function ($q) use ($search) {
+                    $q->where('disease_name', 'like', "%{$search}%")
+                      ->orWhereHas('farmField', fn ($f) => $f->where('name', 'like', "%{$search}%")->orWhere('crop', 'like', "%{$search}%"))
+                      ->orWhereHas('predictedDiseaseLabel', fn ($l) => $l->where('name', 'like', "%{$search}%"));
+                });
+            }
+        }
+
+        $queue = $query->latest()->paginate(24)->withQueryString();
+
+        $statusCounts = [
+            'pending' => FarmImageAnalysis::whereIn('verification_state', ['pending_review', 'disputed'])->count(),
+            'verified' => FarmImageAnalysis::where('verification_state', 'expert_verified')->count(),
+            'rejected' => FarmImageAnalysis::where('verification_state', 'expert_rejected')->count(),
+            'disputed' => FarmImageAnalysis::where('verification_state', 'disputed')->count(),
+            'all' => FarmImageAnalysis::count(),
+        ];
+
+        return view('staff.scans.index', compact('queue', 'statusCounts', 'status'));
     }
 
     public function scanShow(int $scan): View
@@ -313,13 +371,120 @@ class StaffController extends Controller
 
     // ─── Admin ─────────────────────────────────────────────────────────────
 
-    public function admin(): View
+    public function profile(): View
+    {
+        $user = Auth::user();
+
+        return view('staff.profile', compact('user'));
+    }
+
+    public function updateProfile(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
+            'phone_number' => ['nullable', 'string', 'max:30'],
+        ]);
+
+        $user->update([
+            'name' => $data['name'],
+            'email' => strtolower(trim($data['email'])),
+            'phone_number' => $data['phone_number'] ? trim($data['phone_number']) : null,
+        ]);
+
+        $this->writeAudit($request, 'staff.profile.updated', $user);
+
+        return back()->with('status', 'Profile information updated successfully.');
+    }
+
+    public function updatePassword(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password'],
+            'password' => ['required', 'confirmed', Password::min(12)->letters()->numbers()],
+        ]);
+
+        $user->update([
+            'password' => Hash::make($data['password']),
+        ]);
+
+        $this->writeAudit($request, 'staff.password.changed', $user);
+
+        return back()->with('status', 'Password changed successfully.');
+    }
+
+    public function users(Request $request): View
+    {
+        Gate::authorize('administer', User::class);
+
+        $query = User::withCount(['farmImageAnalyses', 'farmFields']);
+
+        if ($role = $request->input('role')) {
+            if (in_array($role, ['farmer', 'agronomist', 'admin'], true)) {
+                $query->where('role', $role);
+            }
+        }
+
+        if ($search = trim((string) $request->input('search'))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%")
+                  ->orWhere('farm_name', 'like', "%{$search}%")
+                  ->orWhere('farm_location', 'like', "%{$search}%")
+                  ->orWhere('phone_number', 'like', "%{$search}%");
+            });
+        }
+
+        $users = $query->latest()->paginate(25)->withQueryString();
+
+        $roleCounts = [
+            'all' => User::count(),
+            'farmer' => User::where('role', 'farmer')->count(),
+            'agronomist' => User::where('role', 'agronomist')->count(),
+            'admin' => User::where('role', 'admin')->count(),
+        ];
+
+        return view('staff.users.index', compact('users', 'roleCounts'));
+    }
+
+    public function userShow(User $user): View
+    {
+        Gate::authorize('administer', User::class);
+
+        $user->loadCount(['farmImageAnalyses', 'farmFields', 'journalEntries', 'calendarTasks']);
+
+        $scans = FarmImageAnalysis::with(['predictedDiseaseLabel', 'farmField:id,name,crop'])
+            ->where('user_id', $user->id)
+            ->latest()
+            ->paginate(15);
+
+        $scanStateCounts = [
+            'total' => $user->farmImageAnalyses()->count(),
+            'verified' => $user->farmImageAnalyses()->where('verification_state', 'expert_verified')->count(),
+            'pending' => $user->farmImageAnalyses()->whereIn('verification_state', ['pending_review', 'disputed'])->count(),
+            'rejected' => $user->farmImageAnalyses()->where('verification_state', 'expert_rejected')->count(),
+        ];
+
+        $fields = $user->farmFields()->latest()->get();
+
+        return view('staff.users.show', compact('user', 'scans', 'scanStateCounts', 'fields'));
+    }
+
+    public function policies(): View
     {
         Gate::authorize('administer', User::class);
         $policies = ConfidencePolicy::latest()->get();
-        $users = User::select('id', 'name', 'email', 'role')->orderBy('name')->paginate(100);
 
-        return view('staff.admin', compact('policies', 'users'));
+        return view('staff.policies.index', compact('policies'));
+    }
+
+    public function admin(): RedirectResponse
+    {
+        return redirect()->route('staff.policies.index');
     }
 
     public function audit(): View
@@ -406,12 +571,15 @@ class StaffController extends Controller
     {
         $cutoff = now()->subDays(30);
 
-        return collect()
+        $activeUserIds = collect()
             ->merge(DB::table('farm_image_analyses')->where('created_at', '>=', $cutoff)->pluck('user_id'))
             ->merge(DB::table('journal_entries')->where('created_at', '>=', $cutoff)->pluck('user_id'))
             ->merge(DB::table('calendar_tasks')->where('completed', true)->where('completed_at', '>=', $cutoff)->pluck('user_id'))
             ->merge(DB::table('field_transactions')->where('created_at', '>=', $cutoff)->pluck('user_id'))
-            ->filter()->unique()->count();
+            ->filter()
+            ->unique();
+
+        return User::where('role', 'farmer')->whereIn('id', $activeUserIds)->count();
     }
 
     /**

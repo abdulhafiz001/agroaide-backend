@@ -19,12 +19,7 @@
 
     {{-- Brand --}}
     <div class="flex h-16 shrink-0 items-center gap-3 border-b border-slate-100 px-5">
-        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 shadow-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-                <circle cx="12" cy="9" r="2.5" stroke="white" fill="none" stroke-width="1.8"/>
-            </svg>
-        </div>
+        <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide" class="h-9 w-9 shrink-0 rounded-xl object-contain shadow-sm">
         <div>
             <p class="text-xs font-bold uppercase tracking-widest text-emerald-700">AgroAide</p>
             <p class="text-xs text-slate-400 leading-none">Staff portal</p>
@@ -32,19 +27,22 @@
     </div>
 
     {{-- User badge --}}
-    <div class="flex shrink-0 items-center gap-3 border-b border-slate-100 px-5 py-3">
+    <a href="{{ route('staff.profile') }}" class="group flex shrink-0 items-center gap-3 border-b border-slate-100 px-5 py-3 transition-colors hover:bg-slate-50">
         <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-800 uppercase">
             {{ substr(auth()->user()->name, 0, 1) }}
         </div>
         <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-medium text-slate-800">{{ auth()->user()->name }}</p>
+            <p class="truncate text-sm font-medium text-slate-800 group-hover:text-emerald-700">{{ auth()->user()->name }}</p>
             @if(auth()->user()->role === 'admin')
                 <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">Admin</span>
             @else
                 <span class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Agronomist</span>
             @endif
         </div>
-    </div>
+        <svg class="h-4 w-4 text-slate-400 group-hover:text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+        </svg>
+    </a>
 
     {{-- Navigation --}}
     <nav class="flex-1 overflow-y-auto px-3 py-4">
@@ -98,13 +96,20 @@
         @if(auth()->user()->isAdmin())
             <p class="mb-1 mt-5 px-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Admin</p>
 
-            <a href="{{ route('staff.admin') }}"
-               class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors {{ request()->routeIs('staff.admin') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+            <a href="{{ route('staff.users.index') }}"
+               class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors {{ request()->routeIs('staff.users.*') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/>
                 </svg>
-                Policies &amp; users
+                Users &amp; Farmers
+            </a>
+
+            <a href="{{ route('staff.policies.index') }}"
+               class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors {{ request()->routeIs('staff.policies.*', 'staff.admin') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+                </svg>
+                Confidence policies
             </a>
 
             <a href="{{ route('staff.audit') }}"
@@ -116,14 +121,14 @@
             </a>
         @endif
 
-        <p class="mb-1 mt-5 px-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Advanced</p>
+        <p class="mb-1 mt-5 px-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Account</p>
 
-        <a href="{{ route('staff.evaluations.index') }}"
-           class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors {{ request()->routeIs('staff.evaluations.*') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+        <a href="{{ route('staff.profile') }}"
+           class="mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors {{ request()->routeIs('staff.profile') ? 'bg-emerald-50 text-emerald-700' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
             <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
             </svg>
-            Evaluations
+            My Profile
         </a>
 
     </nav>
@@ -155,11 +160,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
             </svg>
         </button>
-        <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
-            </svg>
-        </div>
+        <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide" class="h-7 w-7 shrink-0 rounded-lg object-contain">
         <p class="font-semibold text-slate-800 text-sm">@yield('title', 'AgroAide Staff')</p>
     </header>
 

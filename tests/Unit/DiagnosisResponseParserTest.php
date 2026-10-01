@@ -76,4 +76,28 @@ TEXT;
         $this->assertStringContainsString('healthy', strtolower($parsed['summary']));
         $this->assertNotEmpty($parsed['recommendations']['immediate']);
     }
+
+    public function test_parses_inconclusive_condition_and_clears_disease(): void
+    {
+        $parser = new DiagnosisResponseParser;
+        $json = json_encode([
+            'crop' => 'Cassava',
+            'condition' => 'inconclusive',
+            'conditionLabel' => 'Inconclusive Scan',
+            'confidencePercent' => 45,
+            'summary' => 'Lighting glare prevented an accurate assessment.',
+            'disease' => 'Early Blight',
+            'recommendations' => [
+                'immediate' => ['Retake photo in shaded daylight'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+
+        $parsed = $parser->parse($json);
+
+        $this->assertSame('Cassava', $parsed['crop']);
+        $this->assertSame('inconclusive', $parsed['condition']);
+        $this->assertSame('Inconclusive Scan', $parsed['conditionLabel']);
+        $this->assertNull($parsed['disease']);
+        $this->assertSame(['Retake photo in shaded daylight'], $parsed['recommendations']['immediate']);
+    }
 }

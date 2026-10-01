@@ -96,9 +96,18 @@ class CropDiagnosisService
             $parsed['crop'] = $kindwise['crop']['name'];
         }
         if (! empty($kindwise['disease']['name'])) {
-            $parsed['disease'] = is_array($parsed['disease'] ?? null)
-                ? array_merge($parsed['disease'], ['name' => $kindwise['disease']['name']])
-                : ['name' => $kindwise['disease']['name'], 'scientificName' => '', 'symptoms' => [], 'cause' => '', 'severity' => 'moderate', 'spreadRisk' => 'medium'];
+            $diseaseProb = (float) data_get($kindwise, 'disease.probability', 0);
+            if ($diseaseProb < 0.55 || ($parsed['condition'] ?? '') === 'inconclusive') {
+                $parsed['disease'] = null;
+                if (! in_array($parsed['condition'] ?? '', ['healthy', 'good'], true)) {
+                    $parsed['condition'] = 'inconclusive';
+                    $parsed['conditionLabel'] = 'Inconclusive Scan';
+                }
+            } else {
+                $parsed['disease'] = is_array($parsed['disease'] ?? null)
+                    ? array_merge($parsed['disease'], ['name' => $kindwise['disease']['name']])
+                    : ['name' => $kindwise['disease']['name'], 'scientificName' => '', 'symptoms' => [], 'cause' => '', 'severity' => 'moderate', 'spreadRisk' => 'medium'];
+            }
         } elseif ($kindwise['is_healthy']) {
             $parsed['disease'] = null;
             if (! in_array($parsed['condition'] ?? '', ['healthy', 'good'], true)) {
@@ -114,15 +123,16 @@ class CropDiagnosisService
             $promptLeak = true;
         }
 
-        // Never show a disease card when condition is unknown / not a crop.
-        if (($parsed['condition'] ?? '') === 'unknown') {
+        // Never show a disease card when condition is unknown / inconclusive / not a crop.
+        if (in_array($parsed['condition'] ?? '', ['unknown', 'inconclusive'], true)) {
             $parsed['disease'] = null;
         }
 
+        $isInconclusiveResult = ($parsed['condition'] ?? '') === 'inconclusive';
         $isHealthyResult = ! empty($kindwise['is_healthy'])
             || in_array($parsed['condition'] ?? '', ['healthy', 'good'], true);
-        if ($isHealthyResult || $promptLeak) {
-            if ($isHealthyResult || ($kindwise['is_crop'] ?? false)) {
+        if ($isHealthyResult || $isInconclusiveResult || $promptLeak) {
+            if ($isHealthyResult || $isInconclusiveResult || ($kindwise['is_crop'] ?? false)) {
                 $fallback = $this->fromKindwiseFallback($kindwise);
                 if ($promptLeak || str_word_count((string) ($parsed['summary'] ?? '')) < 28) {
                     $parsed['summary'] = $fallback['summary'];
@@ -143,6 +153,18 @@ class CropDiagnosisService
                     'prevention' => [],
                     'longTerm' => [],
                 ];
+            } elseif ($isInconclusiveResult) {
+                $parsed['disease'] = null;
+                $parsed['recommendations']['products'] = [];
+                $parsed['recommendations']['prevention'] = [];
+                $parsed['recommendations']['longTerm'] = [];
+                if (empty($parsed['recommendations']['immediate'])) {
+                    $parsed['recommendations']['immediate'] = [
+                        'Retake photo in even, indirect daylight (avoid direct sunlight glare)',
+                        'Focus closely on a single leaf with steady hands',
+                        'Keep background soil, hands, and boots out of frame',
+                    ];
+                }
             }
         }
 
@@ -263,9 +285,16 @@ class CropDiagnosisService
             'diseaseSuggestions' => array_slice(data_get($kindwise, 'raw.result.disease.suggestions', []) ?: [], 0, 3),
         ];
 
-        $healthyHint = ! empty($kindwise['is_healthy'])
-            ? ' This scan is HEALTHY: write a fuller 4-6 sentence summary and a 2-3 sentence personalizedNote using Kindwise crop notes. Leave recommendation arrays empty.'
-            : ' This scan has a disease: fill recommendations for what the farmer should do.';
+        $diseaseProb = (float) data_get($kindwise, 'disease.probability', 0);
+        $isBorderline = ! empty($kindwise['disease']) && $diseaseProb < 0.55;
+
+        if (! empty($kindwise['is_healthy'])) {
+            $healthyHint = ' This scan is HEALTHY: write a fuller 4-6 sentence summary and a 2-3 sentence personalizedNote using Kindwise crop notes. Leave recommendation arrays empty.';
+        } elseif ($isBorderline || empty($kindwise['disease'])) {
+            $healthyHint = ' This scan is INCONCLUSIVE (confidence is borderline or lighting is ambiguous): set condition to "inconclusive", conditionLabel to "Inconclusive Scan", and disease to null. Explain that lighting glare, shadows, or subtle leaf features prevented a clear diagnosis, and give photo retake recommendations in recommendations.immediate.';
+        } else {
+            $healthyHint = ' This scan has a disease: fill recommendations for what the farmer should do.';
+        }
 
         $messages = [
             [
@@ -302,8 +331,39 @@ class CropDiagnosisService
     {
         $cropName = (string) ($kindwise['crop']['name'] ?? 'Unknown crop');
         $disease = $kindwise['disease'];
-        $healthy = (bool) $kindwise['is_healthy'] || $disease === null;
+        $healthy = (bool) ($kindwise['is_healthy'] ?? false);
+        $diseaseProb = (float) data_get($disease, 'probability', 0);
         $confidence = (int) round(((float) $kindwise['confidence']) * 100);
+        $inconclusive = ! $healthy && ($disease === null || $diseaseProb < 0.55);
+
+        if ($inconclusive) {
+            return [
+                'crop' => $cropName,
+                'condition' => 'inconclusive',
+                'conditionLabel' => 'Inconclusive Scan',
+                'confidencePercent' => max(1, $confidence),
+                'summary' => "The scan for {$cropName} was inconclusive due to lighting glare, harsh sun, or subtle symptoms. The plant appears mostly healthy, but we could not confirm with high confidence. We recommend retaking the photo in shaded, even daylight.",
+                'details' => [
+                    'plantsVisible' => $cropName,
+                    'growthStage' => 'unknown',
+                    'overallVigor' => 'fair',
+                ],
+                'disease' => null,
+                'recommendations' => [
+                    'immediate' => [
+                        'Retake photo in even, indirect daylight (avoid direct sunlight glare)',
+                        'Focus closely on a single leaf with steady hands',
+                        'Keep background soil, hands, and boots out of frame',
+                    ],
+                    'products' => [],
+                    'prevention' => [],
+                    'longTerm' => [],
+                ],
+                'personalizedNote' => 'Good lighting makes a big difference for leaf scans. Try taking another shot in the morning or late afternoon when sunlight is soft.',
+            ];
+        }
+
+        $healthy = $healthy || $disease === null;
         $diseaseName = (string) ($disease['name'] ?? '');
         $details = is_array($disease['details'] ?? null) ? $disease['details'] : [];
         $symptoms = [];

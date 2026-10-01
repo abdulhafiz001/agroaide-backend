@@ -85,10 +85,19 @@ class KindwiseCropHealthClient
         $crop = $this->topSuggestion(data_get($raw, 'result.crop.suggestions'));
         $disease = $this->topSuggestion(data_get($raw, 'result.disease.suggestions'));
         $isCrop = $this->looksLikeCrop($raw, $crop, $disease);
-        $isHealthy = $isCrop && $this->looksHealthy($disease);
-        $confidence = $isCrop
-            ? max((float) ($crop['probability'] ?? 0), (float) ($disease['probability'] ?? 0))
-            : max(0.05, (float) ($crop['probability'] ?? 0));
+        $isHealthy = $isCrop && $this->looksHealthy($raw, $disease);
+
+        $cropProb = (float) ($crop['probability'] ?? 0);
+        $diseaseProb = (float) ($disease['probability'] ?? 0);
+        $healthyProb = (float) data_get($raw, 'result.is_healthy.probability', 0);
+
+        if ($isCrop) {
+            $confidence = $isHealthy
+                ? max($cropProb, $healthyProb > 0 ? $healthyProb : 0.70)
+                : max($cropProb, $diseaseProb);
+        } else {
+            $confidence = max(0.05, $cropProb);
+        }
 
         return [
             'access_token' => data_get($raw, 'access_token'),
@@ -167,8 +176,25 @@ class KindwiseCropHealthClient
         return true;
     }
 
-    private function looksHealthy(?array $disease): bool
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  array<string, mixed>|null  $disease
+     */
+    private function looksHealthy(array $raw, ?array $disease): bool
     {
+        // 1. Kindwise crop.health native binary health check
+        $isHealthyBinary = data_get($raw, 'result.is_healthy.binary');
+        if ($isHealthyBinary === true || $isHealthyBinary === 1 || $isHealthyBinary === 'true') {
+            return true;
+        }
+
+        // 2. Kindwise native health probability check
+        $isHealthyProb = data_get($raw, 'result.is_healthy.probability');
+        if (is_numeric($isHealthyProb) && (float) $isHealthyProb >= 0.50) {
+            return true;
+        }
+
+        // 3. If there is no disease suggestion, it is healthy
         if ($disease === null) {
             return true;
         }
@@ -177,15 +203,22 @@ class KindwiseCropHealthClient
         $type = strtolower((string) data_get($disease, 'details.type', data_get($disease, 'type', '')));
         $probability = (float) ($disease['probability'] ?? 0);
 
+        // 4. Benign / healthy / abiotic indicators
         if (str_contains($name, 'healthy')
             || str_contains($name, 'no disease')
             || $type === 'healthy'
-            || ($probability < 0.15 && str_contains($name, 'abiotic'))) {
+            || ($probability < 0.20 && str_contains($name, 'abiotic'))) {
             return true;
         }
 
-        // Weak disease guesses on otherwise leafy photos should not force "diseased".
-        if ($probability < 0.40) {
+        // 5. If is_healthy.binary is explicitly false, require a strong disease signal (>= 0.50)
+        // Otherwise shadows or lighting artifacts cause false positives.
+        if ($isHealthyBinary === false || $isHealthyBinary === 0 || $isHealthyBinary === 'false') {
+            return $probability < 0.50;
+        }
+
+        // 6. When no explicit is_healthy flag is present, avoid diagnosing disease on weak guesses (< 0.55)
+        if ($probability < 0.55) {
             return true;
         }
 

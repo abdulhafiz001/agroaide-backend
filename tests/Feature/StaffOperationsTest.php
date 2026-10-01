@@ -100,14 +100,14 @@ class StaffOperationsTest extends TestCase
     public function test_dashboard_active_farms_uses_last_thirty_day_activity_and_suppresses_small_counts(): void
     {
         $agronomist = User::factory()->create(['role' => 'agronomist']);
-        $users = User::factory()->count(3)->create();
-        FarmImageAnalysis::create(['user_id' => $users[0]->id, 'condition' => 'healthy', 'result_json' => []]);
+        $farmers = User::factory()->count(3)->create(['role' => 'farmer']);
+        FarmImageAnalysis::create(['user_id' => $farmers[0]->id, 'condition' => 'healthy', 'result_json' => []]);
         DB::table('journal_entries')->insert([
-            'user_id' => $users[1]->id, 'type' => 'observation', 'note' => 'Checked crop',
+            'user_id' => $farmers[1]->id, 'type' => 'observation', 'note' => 'Checked crop',
             'created_at' => now(), 'updated_at' => now(),
         ]);
         DB::table('calendar_tasks')->insert([
-            'user_id' => $users[2]->id, 'title' => 'Scout', 'scheduled_date' => today(),
+            'user_id' => $farmers[2]->id, 'title' => 'Scout', 'scheduled_date' => today(),
             'completed' => true, 'completed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
         ]);
 
@@ -115,11 +115,135 @@ class StaffOperationsTest extends TestCase
             ->assertSee('Active farms (30 d)')
             ->assertSee('>3</p>', false);
 
-        DB::table('journal_entries')->where('user_id', $users[1]->id)->delete();
-        DB::table('calendar_tasks')->where('user_id', $users[2]->id)->delete();
+        DB::table('journal_entries')->where('user_id', $farmers[1]->id)->delete();
+        DB::table('calendar_tasks')->where('user_id', $farmers[2]->id)->delete();
+
+        // Exact count is 1, displayed accurately without '<3' masking
         $this->actingAs($agronomist)->get('/staff')->assertOk()
             ->assertSee('Active farms (30 d)')
-            ->assertSee('&lt;3', false);
+            ->assertSee('>1</p>', false)
+            ->assertDontSee('&lt;3', false);
+    }
+
+    public function test_admin_can_view_users_directory_and_filter(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'name' => 'Admin Jane']);
+        $agronomist = User::factory()->create(['role' => 'agronomist', 'name' => 'Agronomist Bob']);
+        $farmer = User::factory()->create(['role' => 'farmer', 'name' => 'Farmer John', 'farm_name' => 'Green Acres']);
+
+        // Non-admin cannot access users directory
+        $this->actingAs($agronomist)->get('/staff/users')->assertForbidden();
+
+        // Admin can access users directory
+        $this->actingAs($admin)->get('/staff/users')
+            ->assertOk()
+            ->assertSee('Admin Jane')
+            ->assertSee('Agronomist Bob')
+            ->assertSee('Farmer John')
+            ->assertSee('Green Acres');
+
+        // Role filter
+        $this->actingAs($admin)->get('/staff/users?role=farmer')
+            ->assertOk()
+            ->assertSee('Farmer John')
+            ->assertDontSee('Agronomist Bob');
+
+        // Search filter
+        $this->actingAs($admin)->get('/staff/users?search=Green+Acres')
+            ->assertOk()
+            ->assertSee('Farmer John')
+            ->assertDontSee('Agronomist Bob');
+    }
+
+    public function test_admin_can_view_user_details_and_scans_history(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $agronomist = User::factory()->create(['role' => 'agronomist']);
+        $farmer = User::factory()->create([
+            'role' => 'farmer',
+            'name' => 'Amaka Okafor',
+            'farm_name' => 'Sun Valley Farm',
+            'farm_location' => 'Enugu',
+        ]);
+
+        $scan = FarmImageAnalysis::create([
+            'user_id' => $farmer->id,
+            'condition' => 'diseased',
+            'disease_name' => 'Cassava Mosaic',
+            'normalized_confidence' => 0.92,
+            'verification_state' => 'pending_review',
+            'result_json' => [],
+        ]);
+
+        // Agronomist cannot view admin user details
+        $this->actingAs($agronomist)->get("/staff/users/{$farmer->id}")->assertForbidden();
+
+        // Admin can view user details
+        $this->actingAs($admin)->get("/staff/users/{$farmer->id}")
+            ->assertOk()
+            ->assertSee('Amaka Okafor')
+            ->assertSee('Sun Valley Farm')
+            ->assertSee('Enugu')
+            ->assertSee('Cassava Mosaic')
+            ->assertSee('92.0%');
+    }
+
+    public function test_staff_can_view_and_update_profile_and_change_password(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+            'name' => 'Super Admin',
+            'email' => 'admin@agroaide.test',
+            'password' => bcrypt('OldPassword123!'),
+        ]);
+
+        // View profile
+        $this->actingAs($admin)->get('/staff/profile')
+            ->assertOk()
+            ->assertSee('Super Admin')
+            ->assertSee('admin@agroaide.test');
+
+        // Update profile
+        $this->actingAs($admin)->put('/staff/profile', [
+            'name' => 'Updated Admin',
+            'email' => 'newadmin@agroaide.test',
+            'phone_number' => '+2348012345678',
+        ])->assertRedirect();
+
+        $this->assertSame('Updated Admin', $admin->fresh()->name);
+        $this->assertSame('newadmin@agroaide.test', $admin->fresh()->email);
+
+        // Update password with incorrect current password
+        $this->actingAs($admin)->put('/staff/profile/password', [
+            'current_password' => 'WrongPassword!',
+            'password' => 'NewPassword123!',
+            'password_confirmation' => 'NewPassword123!',
+        ])->assertSessionHasErrors('current_password');
+
+        // Update password with correct current password
+        $this->actingAs($admin)->put('/staff/profile/password', [
+            'current_password' => 'OldPassword123!',
+            'password' => 'NewPassword123!',
+            'password_confirmation' => 'NewPassword123!',
+        ])->assertRedirect();
+
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('NewPassword123!', $admin->fresh()->password));
+    }
+
+    public function test_admin_can_access_dedicated_policies_page(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $agronomist = User::factory()->create(['role' => 'agronomist']);
+
+        $this->actingAs($agronomist)->get('/staff/policies')->assertForbidden();
+
+        $this->actingAs($admin)->get('/staff/policies')
+            ->assertOk()
+            ->assertSee('Confidence Policies')
+            ->assertSee('Create New Policy Version');
+
+        $this->actingAs($admin)->get('/staff/admin')
+            ->assertRedirect(route('staff.policies.index'));
     }
 
     public function test_review_rejects_wrong_label_kinds_and_cross_crop_disease_pairs(): void

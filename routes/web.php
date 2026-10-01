@@ -41,6 +41,11 @@ Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
     // System health
     Route::get('/health', [StaffController::class, 'health'])->name('staff.health');
 
+    // Profile & account settings
+    Route::get('/profile', [StaffController::class, 'profile'])->name('staff.profile');
+    Route::put('/profile', [StaffController::class, 'updateProfile'])->name('staff.profile.update');
+    Route::put('/profile/password', [StaffController::class, 'updatePassword'])->name('staff.profile.password');
+
     // Advanced: evaluations
     Route::get('/evaluations', [StaffController::class, 'evaluations'])->name('staff.evaluations.index');
     Route::get('/evaluations/compare', [StaffController::class, 'compare'])->name('staff.evaluations.compare');
@@ -50,6 +55,9 @@ Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
     // Admin-only routes
     Route::middleware('staff:admin')->group(function (): void {
         Route::get('/admin', [StaffController::class, 'admin'])->name('staff.admin');
+        Route::get('/policies', [StaffController::class, 'policies'])->name('staff.policies.index');
+        Route::get('/users', [StaffController::class, 'users'])->name('staff.users.index');
+        Route::get('/users/{user}', [StaffController::class, 'userShow'])->name('staff.users.show');
         Route::get('/audit', [StaffController::class, 'audit'])->name('staff.audit');
         Route::post('/evaluations/datasets/{dataset}/runs', [StaffController::class, 'queueRun'])->name('staff.evaluations.runs.store');
         Route::post('/confidence-policies', [StaffController::class, 'createPolicy'])->name('staff.policies.store');
