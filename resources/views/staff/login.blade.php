@@ -17,6 +17,12 @@
         <h1 class="mt-3 text-2xl font-bold text-stone-900">Staff sign in</h1>
         <p class="mt-1 text-sm text-stone-500">Access the agronomist &amp; staff administration console.</p>
 
+        @if(session('status'))
+            <div class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm font-medium text-emerald-800">
+                {{ session('status') }}
+            </div>
+        @endif
+
         <label class="mt-6 block text-sm font-medium text-stone-700">Email
             <input name="email" type="email" value="{{ old('email') }}" required autofocus class="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-stone-900 placeholder-stone-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600">
         </label>

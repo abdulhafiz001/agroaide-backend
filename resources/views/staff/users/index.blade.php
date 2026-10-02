@@ -5,15 +5,25 @@
 @section('content')
 
 {{-- Header --}}
-<div class="mb-6 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+<div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
     <div>
         <h1 class="text-2xl font-bold text-slate-900">Users &amp; Farmers</h1>
         <p class="mt-0.5 text-sm text-slate-500">Directory of all registered farmers, agronomists, and system administrators.</p>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2.5">
         <span class="rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
             {{ number_format($roleCounts['all'] ?? 0) }} total registered
         </span>
+        @if(auth()->user()?->role === 'admin')
+        <button type="button"
+                onclick="document.getElementById('add-staff-modal').classList.remove('hidden')"
+                class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+            </svg>
+            Add Staff Member
+        </button>
+        @endif
     </div>
 </div>
 
@@ -170,5 +180,101 @@
     </div>
     @endif
 </div>
+
+{{-- Add Staff Member Modal (Admin Only) --}}
+@if(auth()->user()?->role === 'admin')
+<div id="add-staff-modal"
+     class="fixed inset-0 z-50 {{ $errors->any() && old('_form') === 'add_staff' ? '' : 'hidden' }} overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm sm:p-6"
+     aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="flex min-h-full items-center justify-center">
+        <div class="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl transition-all sm:p-8">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div class="flex items-center gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900" id="modal-title">Create Staff Member</h3>
+                        <p class="text-xs text-slate-500">Add an agronomist or admin for console access.</p>
+                    </div>
+                </div>
+                <button type="button"
+                        onclick="document.getElementById('add-staff-modal').classList.add('hidden')"
+                        class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <form method="POST" action="{{ route('staff.users.storeStaff') }}" class="mt-5 space-y-4">
+                @csrf
+                <input type="hidden" name="_form" value="add_staff">
+
+                <div>
+                    <label for="staff-name" class="block text-xs font-semibold text-slate-700 uppercase tracking-wide">Full Name</label>
+                    <input type="text" name="name" id="staff-name" required value="{{ old('name') }}"
+                           class="mt-1.5 block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                           placeholder="e.g. Dr. Jane Smith">
+                    @if(old('_form') === 'add_staff')
+                        @error('name')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
+                    @endif
+                </div>
+
+                <div>
+                    <label for="staff-email" class="block text-xs font-semibold text-slate-700 uppercase tracking-wide">Email Address</label>
+                    <input type="email" name="email" id="staff-email" required value="{{ old('email') }}"
+                           class="mt-1.5 block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                           placeholder="staff@agroaide.org">
+                    @if(old('_form') === 'add_staff')
+                        @error('email')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
+                    @endif
+                </div>
+
+                <div>
+                    <label for="staff-role" class="block text-xs font-semibold text-slate-700 uppercase tracking-wide">Role &amp; Permissions</label>
+                    <select name="role" id="staff-role" required
+                            class="mt-1.5 block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 bg-white">
+                        <option value="agronomist" {{ old('role') === 'agronomist' ? 'selected' : '' }}>Agronomist (Scan verification, diagnosis reviews, field logs)</option>
+                        <option value="admin" {{ old('role') === 'admin' ? 'selected' : '' }}>Administrator (Full access, confidence policies, user roles)</option>
+                    </select>
+                    @if(old('_form') === 'add_staff')
+                        @error('role')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
+                    @endif
+                </div>
+
+                <div>
+                    <label for="staff-password" class="block text-xs font-semibold text-slate-700 uppercase tracking-wide">Initial Password</label>
+                    <input type="password" name="password" id="staff-password" required
+                           class="mt-1.5 block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                           placeholder="Min. 12 characters, letters &amp; numbers">
+                    @if(old('_form') === 'add_staff')
+                        @error('password')<p class="mt-1 text-xs text-red-600">{{ $message }}</p>@enderror
+                    @endif
+                </div>
+
+                <div>
+                    <label for="staff-password-confirm" class="block text-xs font-semibold text-slate-700 uppercase tracking-wide">Confirm Password</label>
+                    <input type="password" name="password_confirmation" id="staff-password-confirm" required
+                           class="mt-1.5 block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                           placeholder="Re-enter password">
+                </div>
+
+                <div class="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                    <button type="button"
+                            onclick="document.getElementById('add-staff-modal').classList.add('hidden')"
+                            class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="rounded-xl bg-emerald-700 px-5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2">
+                        Create Staff Account
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+@endif
 
 @endsection

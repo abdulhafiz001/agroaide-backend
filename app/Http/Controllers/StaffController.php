@@ -96,7 +96,7 @@ class StaffController extends Controller
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect()->route('staff.login');
+        return redirect()->route('staff.login')->with('status', 'You have been signed out.');
     }
 
     // ─── Dashboard ─────────────────────────────────────────────────────────
@@ -449,6 +449,31 @@ class StaffController extends Controller
         ];
 
         return view('staff.users.index', compact('users', 'roleCounts'));
+    }
+
+    public function storeStaff(Request $request): RedirectResponse
+    {
+        Gate::authorize('administer', User::class);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'email', 'max:255', 'unique:users,email'],
+            'role' => ['required', Rule::in(['agronomist', 'admin'])],
+            'password' => ['required', 'confirmed', Password::min(12)->letters()->numbers()],
+        ]);
+
+        $user = User::create([
+            'name' => $data['name'],
+            'email' => strtolower(trim($data['email'])),
+            'password' => Hash::make($data['password']),
+            'role' => $data['role'],
+            'email_verified_at' => now(),
+        ]);
+
+        $this->writeAudit($request, 'staff.account.created', $user, ['role' => $data['role']]);
+
+        return redirect()->route('staff.users.index')
+            ->with('status', ucfirst($data['role']).' account created successfully for '.$user->name.'.');
     }
 
     public function userShow(User $user): View

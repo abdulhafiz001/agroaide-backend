@@ -268,6 +268,55 @@ class StaffOperationsTest extends TestCase
         ])->assertSessionHasErrors('disease_label_id');
     }
 
+    public function test_unauthenticated_or_expired_session_redirects_to_staff_login_without_500(): void
+    {
+        // Unauthenticated access to /staff must redirect to staff.login (HTTP 302, never 500)
+        $this->get('/staff')
+            ->assertRedirect(route('staff.login'));
+
+        // Route fallback for 'login' also redirects to staff.login
+        $this->get('/login')
+            ->assertRedirect(route('staff.login'));
+
+        // Logout via GET or POST works cleanly even when already logged out / expired
+        $this->get('/staff/logout')
+            ->assertRedirect(route('staff.login'));
+
+        $this->post('/staff/logout')
+            ->assertRedirect(route('staff.login'));
+    }
+
+    public function test_admin_can_create_new_staff_member(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $agronomist = User::factory()->create(['role' => 'agronomist']);
+
+        // Non-admin cannot create staff
+        $this->actingAs($agronomist)->post('/staff/users/staff', [
+            'name' => 'Dr. Jane Smith',
+            'email' => 'jane@agroaide.org',
+            'role' => 'agronomist',
+            'password' => 'SecurePass123!',
+            'password_confirmation' => 'SecurePass123!',
+        ])->assertForbidden();
+
+        // Admin can create agronomist
+        $response = $this->actingAs($admin)->post('/staff/users/staff', [
+            'name' => 'Dr. Jane Smith',
+            'email' => 'jane@agroaide.org',
+            'role' => 'agronomist',
+            'password' => 'SecurePass123!',
+            'password_confirmation' => 'SecurePass123!',
+        ]);
+
+        $response->assertRedirect(route('staff.users.index'));
+        $this->assertDatabaseHas('users', [
+            'email' => 'jane@agroaide.org',
+            'role' => 'agronomist',
+            'name' => 'Dr. Jane Smith',
+        ]);
+    }
+
     private function lockedDataset(User $admin): EvaluationDataset
     {
         $dataset = EvaluationDataset::create([

@@ -10,6 +10,10 @@ Route::get('/', function () {
 Route::view('/legal/terms', 'legal.terms')->name('legal.terms');
 Route::view('/legal/privacy', 'legal.privacy')->name('legal.privacy');
 
+Route::get('/login', function () {
+    return redirect()->route('staff.login');
+})->name('login');
+
 Route::middleware('guest')->group(function (): void {
     Route::get('/staff/login', [StaffController::class, 'login'])->name('staff.login');
     Route::post('/staff/login', [StaffController::class, 'authenticate'])
@@ -21,10 +25,11 @@ Route::middleware('guest')->group(function (): void {
         ->name('staff.setup.store');
 });
 
+Route::match(['get', 'post'], '/staff/logout', [StaffController::class, 'logout'])->name('staff.logout');
+
 Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
     // Core pages
     Route::get('/', [StaffController::class, 'dashboard'])->name('staff.dashboard');
-    Route::post('/logout', [StaffController::class, 'logout'])->name('staff.logout');
 
     // Scan review
     Route::get('/scans', [StaffController::class, 'scans'])->name('staff.scans.index');
@@ -57,6 +62,7 @@ Route::middleware(['auth', 'staff'])->prefix('staff')->group(function (): void {
         Route::get('/admin', [StaffController::class, 'admin'])->name('staff.admin');
         Route::get('/policies', [StaffController::class, 'policies'])->name('staff.policies.index');
         Route::get('/users', [StaffController::class, 'users'])->name('staff.users.index');
+        Route::post('/users/staff', [StaffController::class, 'storeStaff'])->name('staff.users.storeStaff');
         Route::get('/users/{user}', [StaffController::class, 'userShow'])->name('staff.users.show');
         Route::get('/audit', [StaffController::class, 'audit'])->name('staff.audit');
         Route::post('/evaluations/datasets/{dataset}/runs', [StaffController::class, 'queueRun'])->name('staff.evaluations.runs.store');

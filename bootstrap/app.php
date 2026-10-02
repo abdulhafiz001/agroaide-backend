@@ -49,8 +49,18 @@ return Application::configure(basePath: dirname(__DIR__))
             'consent.current' => RequireCurrentConsent::class,
             'staff' => RequireStaffRole::class,
         ]);
+        $middleware->redirectGuestsTo(fn (Request $request) => route('staff.login'));
+        $middleware->validateCsrfTokens(except: [
+            'staff/logout',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, Request $request) {
+            if ($request->is('staff/*') || $request->is('staff')) {
+                return redirect()->route('staff.login')->withErrors(['email' => 'Your session has expired. Please sign in again.']);
+            }
+        });
+
         $exceptions->render(function (Throwable $e, Request $request) {
             if (
                 $request->expectsJson()
