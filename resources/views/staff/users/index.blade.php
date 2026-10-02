@@ -16,7 +16,8 @@
         </span>
         @if(auth()->user()?->role === 'admin')
         <button type="button"
-                onclick="document.getElementById('add-staff-modal').classList.remove('hidden')"
+                id="btn-open-add-staff"
+                data-modal-open="add-staff-modal"
                 class="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
@@ -186,7 +187,7 @@
 <div id="add-staff-modal"
      class="fixed inset-0 z-50 {{ $errors->any() && old('_form') === 'add_staff' ? '' : 'hidden' }} overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm sm:p-6"
      aria-labelledby="modal-title" role="dialog" aria-modal="true">
-    <div class="flex min-h-full items-center justify-center">
+    <div class="flex min-h-full items-center justify-center modal-backdrop-area">
         <div class="relative w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl transition-all sm:p-8">
             <div class="flex items-center justify-between pb-4 border-b border-slate-100">
                 <div class="flex items-center gap-3">
@@ -201,7 +202,7 @@
                     </div>
                 </div>
                 <button type="button"
-                        onclick="document.getElementById('add-staff-modal').classList.add('hidden')"
+                        data-modal-close="add-staff-modal"
                         class="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
@@ -262,7 +263,7 @@
 
                 <div class="mt-6 flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
                     <button type="button"
-                            onclick="document.getElementById('add-staff-modal').classList.add('hidden')"
+                            data-modal-close="add-staff-modal"
                             class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                         Cancel
                     </button>

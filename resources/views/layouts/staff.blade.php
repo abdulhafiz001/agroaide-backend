@@ -10,8 +10,7 @@
 
 {{-- Mobile backdrop --}}
 <div id="sidebar-backdrop"
-     class="fixed inset-0 z-20 bg-slate-900/40 backdrop-blur-sm hidden lg:hidden"
-     onclick="closeSidebar()"></div>
+     class="fixed inset-0 z-20 bg-slate-900/40 backdrop-blur-sm hidden lg:hidden"></div>
 
 {{-- ═══ Sidebar ═══ --}}
 <aside id="sidebar"
@@ -154,7 +153,8 @@
 
     {{-- Mobile top bar --}}
     <header class="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 lg:hidden">
-        <button onclick="openSidebar()"
+        <button id="mobile-sidebar-open"
+                type="button"
                 class="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus:outline-none">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>
@@ -189,19 +189,6 @@
     </main>
 
 </div>
-
-<script>
-    function openSidebar() {
-        document.getElementById('sidebar').classList.remove('-translate-x-full');
-        document.getElementById('sidebar-backdrop').classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-    }
-    function closeSidebar() {
-        document.getElementById('sidebar').classList.add('-translate-x-full');
-        document.getElementById('sidebar-backdrop').classList.add('hidden');
-        document.body.style.overflow = '';
-    }
-</script>
 
 </body>
 </html>
