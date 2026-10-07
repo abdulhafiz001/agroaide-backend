@@ -16,10 +16,13 @@ return [
     'name' => env('APP_NAME', 'AgroAide'),
 
     /*
-    | Public Android APK / Play download link shown on the marketing landing page.
-    | Example: https://agroaide.ahzcode.sbs/downloads/agroaide.apk
+    | Public Android APK download link on the marketing landing page (direct URL preferred).
+    | Google Drive view links are normalized to uc?export=download on the landing page.
     */
-    'android_apk_url' => env('ANDROID_APK_URL', ''),
+    'android_apk_url' => env(
+        'ANDROID_APK_URL',
+        'https://drive.google.com/uc?export=download&id=1eHLd7pRosS_no1ocu2a8NsuHPgNzRdjQ',
+    ),
 
     /*
     |--------------------------------------------------------------------------

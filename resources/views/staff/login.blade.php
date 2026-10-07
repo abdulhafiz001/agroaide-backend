@@ -8,7 +8,7 @@
 </head>
 <body class="min-h-screen bg-stone-100 text-stone-900">
 <main class="mx-auto flex min-h-screen max-w-md items-center px-5 py-8">
-    <form method="post" action="{{ route('staff.authenticate') }}" class="w-full rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
+    <form id="staff-login-form" method="post" action="{{ route('staff.authenticate') }}" class="w-full rounded-2xl border border-stone-200 bg-white p-8 shadow-sm">
         @csrf
         <div class="flex items-center gap-2.5">
             <img src="{{ asset('images/agroaideLogo.png') }}" alt="AgroAide" class="h-8 w-8 rounded-lg object-contain">
@@ -58,8 +58,16 @@
             </label>
         </div>
 
-        <button type="submit" class="mt-6 w-full rounded-lg bg-emerald-700 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2">
-            Sign in
+        <button
+            type="submit"
+            id="staff-sign-in-btn"
+            class="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 font-semibold text-white shadow-sm transition-colors hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-600 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-70"
+        >
+            <svg id="staff-sign-in-spinner" class="hidden h-5 w-5 animate-spin text-white" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span id="staff-sign-in-label">Sign in</span>
         </button>
 
         @if ($needsSetup ?? false)
@@ -86,6 +94,23 @@
                     eyeOpen.classList.toggle('hidden', isPassword);
                     eyeClosed.classList.toggle('hidden', !isPassword);
                 }
+            });
+        }
+
+        const loginForm = document.getElementById('staff-login-form');
+        const signInBtn = document.getElementById('staff-sign-in-btn');
+        const signInLabel = document.getElementById('staff-sign-in-label');
+        const signInSpinner = document.getElementById('staff-sign-in-spinner');
+
+        if (loginForm && signInBtn && signInLabel && signInSpinner) {
+            loginForm.addEventListener('submit', function () {
+                if (!loginForm.checkValidity()) {
+                    return;
+                }
+                signInBtn.disabled = true;
+                signInBtn.setAttribute('aria-busy', 'true');
+                signInSpinner.classList.remove('hidden');
+                signInLabel.textContent = 'Signing in…';
             });
         }
     });

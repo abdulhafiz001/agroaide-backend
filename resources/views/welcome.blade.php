@@ -896,6 +896,84 @@
     color: var(--text-muted);
   }
 
+  /* APK download countdown modal */
+  .apk-download-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(4, 8, 6, 0.82);
+    backdrop-filter: blur(6px);
+  }
+  .apk-download-overlay.is-open {
+    display: flex;
+  }
+  .apk-download-dialog {
+    width: min(100%, 22rem);
+    text-align: center;
+    padding: 2.25rem 1.75rem 2rem;
+    border-radius: 22px;
+    border: 1px solid rgba(52, 211, 153, 0.35);
+    background: linear-gradient(165deg, #15251d 0%, #0c1510 100%);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 32px var(--primary-glow);
+  }
+  .apk-download-dialog h3 {
+    font-family: var(--font-heading);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0 0 0.35rem;
+  }
+  .apk-download-dialog p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+  .apk-download-count {
+    font-family: var(--font-heading);
+    font-size: clamp(3.5rem, 12vw, 5rem);
+    font-weight: 800;
+    line-height: 1;
+    margin: 1.25rem 0 0.5rem;
+    color: var(--gold-light);
+    letter-spacing: -0.04em;
+  }
+  .apk-download-spinner {
+    width: 42px;
+    height: 42px;
+    margin: 1.25rem auto 0.75rem;
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    border-top-color: var(--primary-light);
+    border-radius: 50%;
+    animation: apk-spin 0.85s linear infinite;
+  }
+  @keyframes apk-spin {
+    to { transform: rotate(360deg); }
+  }
+  .apk-download-fallback {
+    display: none;
+    margin-top: 1.25rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+  }
+  .apk-download-fallback.is-visible {
+    display: block;
+  }
+  .apk-download-fallback a {
+    color: var(--primary-light);
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  button.btn {
+    border: none;
+    cursor: pointer;
+    font: inherit;
+  }
+
   /* ------------------- FOOTER ------------------- */
   .site-footer {
     background: #080c09;
@@ -983,6 +1061,11 @@
 
 @php
     $apkUrl = trim((string) config('app.android_apk_url'));
+    if ($apkUrl !== '' && preg_match('#drive\.google\.com/file/d/([a-zA-Z0-9_-]+)#', $apkUrl, $driveMatch)) {
+        $apkUrl = 'https://drive.google.com/uc?export=download&id='.$driveMatch[1];
+    } elseif ($apkUrl !== '' && preg_match('#drive\.google\.com/open\?id=([a-zA-Z0-9_-]+)#', $apkUrl, $driveOpen)) {
+        $apkUrl = 'https://drive.google.com/uc?export=download&id='.$driveOpen[1];
+    }
     $hasApk = $apkUrl !== '';
 @endphp
 
@@ -1013,10 +1096,10 @@
 
     <div class="nav-actions">
       @if ($hasApk)
-        <a href="{{ $apkUrl }}" class="btn btn-primary btn-sm" id="nav-download-btn">
+        <button type="button" class="btn btn-primary btn-sm js-apk-download" data-apk-url="{{ $apkUrl }}" id="nav-download-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v13m0 0-4-4m4 4 4-4M5 21h14"/></svg>
           Get App
-        </a>
+        </button>
       @else
         <a href="#download" class="btn btn-primary btn-sm">Download App</a>
       @endif
@@ -1047,10 +1130,10 @@
 
       <div class="hero-actions">
         @if ($hasApk)
-          <a href="{{ $apkUrl }}" class="btn btn-gold" id="hero-download-btn">
+          <button type="button" class="btn btn-gold js-apk-download" data-apk-url="{{ $apkUrl }}" id="hero-download-btn">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v13m0 0-4-4m4 4 4-4M5 21h14"/></svg>
             Download Android App (.APK)
-          </a>
+          </button>
         @else
           <a href="#download" class="btn btn-gold">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v13m0 0-4-4m4 4 4-4M5 21h14"/></svg>
@@ -1738,10 +1821,10 @@
 
       <div class="download-buttons-wrap">
         @if ($hasApk)
-          <a href="{{ $apkUrl }}" class="btn btn-gold" style="padding:0.95rem 2rem; font-size:1.05rem;" id="footer-download-btn">
+          <button type="button" class="btn btn-gold js-apk-download" data-apk-url="{{ $apkUrl }}" style="padding:0.95rem 2rem; font-size:1.05rem;" id="footer-download-btn">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 3v13m0 0-4-4m4 4 4-4M5 21h14"/></svg>
             Download Android APK (Direct)
-          </a>
+          </button>
         @else
           <a href="#" class="btn btn-gold" style="padding:0.95rem 2rem; font-size:1.05rem; opacity:0.65; cursor:not-allowed;">
             Download Android APK
@@ -1820,6 +1903,120 @@
     </div>
   </div>
 </footer>
+
+@if ($hasApk)
+<div class="apk-download-overlay" id="apk-download-modal" role="dialog" aria-modal="true" aria-labelledby="apk-download-title" aria-hidden="true">
+  <div class="apk-download-dialog">
+    <h3 id="apk-download-title">Preparing your download</h3>
+    <p id="apk-download-subtitle">AgroAide for Android</p>
+    <div class="apk-download-count" id="apk-download-count" aria-live="polite">3</div>
+    <p id="apk-download-status">Starting in a moment…</p>
+    <div class="apk-download-spinner" id="apk-download-spinner" hidden></div>
+    <div class="apk-download-fallback" id="apk-download-fallback">
+      If nothing started, <a href="{{ $apkUrl }}" id="apk-download-manual-link" rel="noopener">tap here to download the APK</a>.
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var modal = document.getElementById('apk-download-modal');
+  if (!modal) return;
+
+  var countEl = document.getElementById('apk-download-count');
+  var statusEl = document.getElementById('apk-download-status');
+  var titleEl = document.getElementById('apk-download-title');
+  var spinnerEl = document.getElementById('apk-download-spinner');
+  var fallbackEl = document.getElementById('apk-download-fallback');
+  var manualLink = document.getElementById('apk-download-manual-link');
+  var busy = false;
+
+  function openModal() {
+    modal.classList.add('is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    countEl.hidden = false;
+    spinnerEl.hidden = true;
+    fallbackEl.classList.remove('is-visible');
+    titleEl.textContent = 'Preparing your download';
+    statusEl.textContent = 'Starting in a moment…';
+  }
+
+  function closeModal() {
+    modal.classList.remove('is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    busy = false;
+  }
+
+  function triggerDownload(url) {
+    var iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.src = url;
+    document.body.appendChild(iframe);
+
+    var link = document.createElement('a');
+    link.href = url;
+    link.rel = 'noopener';
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(function () {
+      iframe.remove();
+    }, 60000);
+  }
+
+  function startDownload(url) {
+    if (busy || !url) return;
+    busy = true;
+    openModal();
+
+    var step = 3;
+    countEl.textContent = String(step);
+
+    function tick() {
+      if (step > 1) {
+        step -= 1;
+        countEl.textContent = String(step);
+        window.setTimeout(tick, 1000);
+        return;
+      }
+
+      countEl.hidden = true;
+      spinnerEl.hidden = false;
+      titleEl.textContent = 'Downloading AgroAide';
+      statusEl.textContent = 'Your APK should appear in your browser or notification bar.';
+      triggerDownload(url);
+
+      window.setTimeout(function () {
+        fallbackEl.classList.add('is-visible');
+        if (manualLink) {
+          manualLink.href = url;
+        }
+      }, 4000);
+
+      window.setTimeout(closeModal, 12000);
+    }
+
+    window.setTimeout(tick, 1000);
+  }
+
+  document.querySelectorAll('.js-apk-download').forEach(function (btn) {
+    btn.addEventListener('click', function (event) {
+      event.preventDefault();
+      startDownload(btn.getAttribute('data-apk-url') || '');
+    });
+  });
+
+  modal.addEventListener('click', function (event) {
+    if (event.target === modal && !busy) {
+      closeModal();
+    }
+  });
+})();
+</script>
+@endif
 
 </body>
 </html>
