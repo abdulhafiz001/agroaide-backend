@@ -51,7 +51,7 @@ class LlmChatClient
                     ]);
 
                     // Do not retry other models on the same provider if the API key itself was rejected.
-                    if (preg_match('/HTTP (?:401|403)\b/', $e->getMessage()) === 1) {
+                    if (preg_match('/HTTP (?:401|403)\b|API key not valid|invalid_api_key/i', $e->getMessage()) === 1) {
                         break;
                     }
                 }

@@ -692,7 +692,7 @@ PROMPT;
     {
         try {
             return $this->llm->chat($messages, array_merge([
-                'timeout' => 45,
+                'timeout' => 25,
                 'max_tokens' => 1024,
                 'temperature' => 0.5,
             ], $options));
@@ -735,10 +735,14 @@ PROMPT;
                 }
             }
         }
-        foreach (FarmField::where('user_id', $user->id)->pluck('crop_type')->all() as $fieldCrop) {
-            if (is_string($fieldCrop) && trim($fieldCrop) !== '') {
-                $userTerms[] = strtolower(trim($fieldCrop));
+        try {
+            foreach (FarmField::where('user_id', $user->id)->pluck('crop')->all() as $fieldCrop) {
+                if (is_string($fieldCrop) && trim($fieldCrop) !== '') {
+                    $userTerms[] = strtolower(trim($fieldCrop));
+                }
             }
+        } catch (\Throwable) {
+            // Ignore field lookup errors during off-topic precheck.
         }
 
         foreach ($userTerms as $term) {
@@ -818,7 +822,7 @@ PROMPT;
 
         $pendingTasks = CalendarTask::where('user_id', $user->id)
             ->where('completed', false)
-            ->orderBy('due_date')
+            ->orderBy('scheduled_date')
             ->limit(3)
             ->get();
 
@@ -853,7 +857,7 @@ PROMPT;
         $taskLine = '';
         if ($pendingTasks->isNotEmpty()) {
             $taskTitles = $pendingTasks
-                ->map(fn ($t) => "{$t->title} (due ".optional($t->due_date)?->toDateString().')')
+                ->map(fn ($t) => "{$t->title} (due ".(optional($t->scheduled_date)->toDateString() ?? (string) $t->scheduled_date).')')
                 ->implode(', ');
             $taskLine = "Your upcoming scheduled farm tasks are: {$taskTitles}.";
         } else {
@@ -863,7 +867,7 @@ PROMPT;
         $fieldLine = '';
         if ($fields->isNotEmpty()) {
             $fieldSummary = $fields
-                ->map(fn ($f) => "{$f->name} ({$f->crop_type}, status: {$f->status})")
+                ->map(fn ($f) => "{$f->name} ({$f->crop}, status: {$f->status})")
                 ->implode('; ');
             $fieldLine = "Active fields on {$farmName}: {$fieldSummary}.";
         } else {

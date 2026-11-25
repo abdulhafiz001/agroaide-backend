@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\AdvisorConversation;
+use App\Models\CalendarTask;
+use App\Models\FarmField;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -110,6 +112,21 @@ class AiAdvisorScopeAndResilienceTest extends TestCase
             'crops' => ['maize', 'tomato'],
         ]);
 
+        FarmField::create([
+            'user_id' => $user->id,
+            'name' => 'North Plot',
+            'crop' => 'sorghum',
+            'area_m2' => 1500,
+            'status' => 'active',
+        ]);
+
+        CalendarTask::create([
+            'user_id' => $user->id,
+            'title' => 'Top-dress maize with urea',
+            'scheduled_date' => now()->toDateString(),
+            'completed' => false,
+        ]);
+
         AdvisorConversation::create([
             'user_id' => $user->id,
             'role' => 'assistant',
@@ -128,5 +145,7 @@ class AiAdvisorScopeAndResilienceTest extends TestCase
         $reply = (string) $chatResponse->json('reply');
         $this->assertStringNotContainsString('temporarily unavailable', strtolower($reply));
         $this->assertStringContainsString('Zaria Agro Plot', $reply);
+        $this->assertStringContainsString('North Plot (sorghum, status: active)', $reply);
+        $this->assertStringContainsString('Top-dress maize with urea', $reply);
     }
 }
