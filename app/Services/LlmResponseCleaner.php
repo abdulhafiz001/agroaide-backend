@@ -62,7 +62,7 @@ class LlmResponseCleaner
         $cleaned = preg_replace('/harvest[-_]window:fieldId?=\d+/i', '', $cleaned) ?? $cleaned;
         $cleaned = preg_replace('/\[fieldId=\d+\]/i', '', $cleaned) ?? $cleaned;
 
-        return trim(preg_replace('/\s{2,}/', ' ', $cleaned) ?? $cleaned);
+        return trim(preg_replace('/[ \t]{2,}/', ' ', $cleaned) ?? $cleaned);
     }
 
     public function normalizeDashes(string $text): string
@@ -71,7 +71,7 @@ class LlmResponseCleaner
         $cleaned = str_replace(["\xE2\x80\x94", "\xE2\x80\x93", '—', '–'], '-', $text);
         $cleaned = preg_replace('/(?<=\s)--(?=\s)/', '-', $cleaned) ?? $cleaned;
 
-        return trim(preg_replace('/\s{2,}/', ' ', $cleaned) ?? $cleaned);
+        return trim(preg_replace('/[ \t]{2,}/', ' ', $cleaned) ?? $cleaned);
     }
 
     public function looksLikeReasoning(string $text): bool
@@ -137,9 +137,8 @@ class LlmResponseCleaner
     private function stripAnalysisBullets(string $text): string
     {
         $cleaned = preg_replace('/^\*\*\s*analyze[^*\n]+\*\*\s*:?.*/im', '', $text) ?? $text;
-        $cleaned = preg_replace('/^- \*\*[^*]+\*\*.*$/im', '', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/^\s*[-*]\s+\*\*(?:deconstruct|goal|language|kind|crop|location|contextual note|analyze|user input|step)[^*]*\*\*.*$/im', '', $cleaned) ?? $cleaned;
         $cleaned = preg_replace('/^\s*\d+\.\s*\*\*(?:deconstruct|goal|language|kind|crop|location)[^*]*\*\*.*$/im', '', $cleaned) ?? $cleaned;
-        $cleaned = preg_replace('/^\s*\*\s+\*\*(?:goal|language|kind|crop|location|contextual note)[^*]*\*\*.*$/im', '', $cleaned) ?? $cleaned;
 
         return $cleaned;
     }

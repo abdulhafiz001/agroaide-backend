@@ -50,15 +50,15 @@ return [
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
         'base_url' => 'https://generativelanguage.googleapis.com/v1beta',
-        'text_model' => env('GEMINI_TEXT_MODEL', 'gemini-2.0-flash'),
-        'vision_model' => env('GEMINI_VISION_MODEL', 'gemini-2.0-flash'),
+        'text_model' => env('GEMINI_TEXT_MODEL', 'gemini-2.5-flash'),
+        'vision_model' => env('GEMINI_VISION_MODEL', 'gemini-2.5-flash'),
     ],
 
     // Optional legacy NVIDIA NIM fallback.
     'nvidia' => [
         'api_key' => env('NVIDIA_API_KEY'),
         'chat_endpoint' => 'https://integrate.api.nvidia.com/v1/chat/completions',
-        'text_model' => env('NVIDIA_TEXT_MODEL', 'meta/llama-3.3-70b-instruct'),
+        'text_model' => env('NVIDIA_TEXT_MODEL', 'meta/llama-3.1-70b-instruct'),
         'vision_model' => env('NVIDIA_VISION_MODEL', 'meta/llama-3.2-11b-vision-instruct'),
     ],
 
@@ -66,8 +66,8 @@ return [
     'groq' => [
         'api_key' => env('GROQ_API_KEY'),
         'chat_endpoint' => 'https://api.groq.com/openai/v1/chat/completions',
-        'text_model' => env('GROQ_TEXT_MODEL', 'qwen/qwen3.6-27b'),
-        'vision_model' => env('GROQ_VISION_MODEL', 'qwen/qwen3.6-27b'),
+        'text_model' => env('GROQ_TEXT_MODEL', 'llama-3.3-70b-versatile'),
+        'vision_model' => env('GROQ_VISION_MODEL', 'meta-llama/llama-4-scout-17b-16e-instruct'),
         'transcription_endpoint' => 'https://api.groq.com/openai/v1/audio/transcriptions',
         'transcription_model' => 'whisper-large-v3',
     ],

@@ -28,19 +28,33 @@ class LlmChatClient
 
         $lastError = null;
         foreach ($providers as $provider) {
-            try {
-                $raw = $provider['name'] === 'gemini'
-                    ? $this->requestGemini($provider, $messages, $options)
-                    : $this->requestOpenAiCompatible($provider, $messages, $options);
+            $models = $provider['models'] ?? [$provider['model']];
+            foreach ($models as $model) {
+                $providerWithModel = array_merge($provider, ['model' => $model]);
+                try {
+                    $raw = $provider['name'] === 'gemini'
+                        ? $this->requestGemini($providerWithModel, $messages, $options)
+                        : $this->requestOpenAiCompatible($providerWithModel, $messages, $options);
 
-                return $this->cleaner->clean($raw);
-            } catch (\Throwable $e) {
-                $lastError = $e;
-                Log::warning('LLM provider failed; trying next', [
-                    'provider' => $provider['name'],
-                    'model' => $provider['model'],
-                    'error' => $e->getMessage(),
-                ]);
+                    $cleaned = $this->cleaner->clean($raw);
+                    if ($cleaned === '') {
+                        throw new RuntimeException($provider['name'].' returned an empty completion after cleaning.');
+                    }
+
+                    return $cleaned;
+                } catch (\Throwable $e) {
+                    $lastError = $e;
+                    Log::warning('LLM provider failed; trying next', [
+                        'provider' => $provider['name'],
+                        'model' => $model,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    // Do not retry other models on the same provider if the API key itself was rejected.
+                    if (preg_match('/HTTP (?:401|403)\b/', $e->getMessage()) === 1) {
+                        break;
+                    }
+                }
             }
         }
 
@@ -52,7 +66,7 @@ class LlmChatClient
     }
 
     /**
-     * @return array<int, array{name:string,api_key:string,endpoint?:string,base_url?:string,model:string}>
+     * @return array<int, array{name:string,api_key:string,endpoint?:string,base_url?:string,model:string,models:list<string>}>
      */
     private function providers(bool $wantsVision): array
     {
@@ -60,41 +74,118 @@ class LlmChatClient
 
         $geminiKey = trim((string) config('services.gemini.api_key', ''));
         if ($geminiKey !== '') {
+            $configured = $wantsVision
+                ? (string) config('services.gemini.vision_model')
+                : (string) config('services.gemini.text_model');
+            $primary = $this->normalizeModel('gemini', $configured, $wantsVision);
             $providers[] = [
                 'name' => 'gemini',
                 'api_key' => $geminiKey,
                 'base_url' => (string) config('services.gemini.base_url'),
-                'model' => $wantsVision
-                    ? (string) config('services.gemini.vision_model')
-                    : (string) config('services.gemini.text_model'),
+                'model' => $primary,
+                'models' => array_values(array_unique([
+                    $primary,
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
+                    'gemini-flash-latest',
+                ])),
             ];
         }
 
         $groqKey = trim((string) config('services.groq.api_key', ''));
         if ($groqKey !== '') {
+            $configured = $wantsVision
+                ? (string) config('services.groq.vision_model')
+                : (string) config('services.groq.text_model');
+            $primary = $this->normalizeModel('groq', $configured, $wantsVision);
+            $fallbackModels = $wantsVision
+                ? [$primary, 'meta-llama/llama-4-scout-17b-16e-instruct']
+                : [$primary, 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
             $providers[] = [
                 'name' => 'groq',
                 'api_key' => $groqKey,
                 'endpoint' => (string) config('services.groq.chat_endpoint'),
-                'model' => $wantsVision
-                    ? (string) config('services.groq.vision_model')
-                    : (string) config('services.groq.text_model'),
+                'model' => $primary,
+                'models' => array_values(array_unique($fallbackModels)),
             ];
         }
 
         $nvidiaKey = trim((string) config('services.nvidia.api_key', ''));
         if ($nvidiaKey !== '') {
+            $configured = $wantsVision
+                ? (string) config('services.nvidia.vision_model')
+                : (string) config('services.nvidia.text_model');
+            $primary = $this->normalizeModel('nvidia', $configured, $wantsVision);
+            $fallbackModels = $wantsVision
+                ? [$primary]
+                : [$primary, 'meta/llama-3.1-70b-instruct', 'meta/llama-3.1-8b-instruct'];
             $providers[] = [
                 'name' => 'nvidia',
                 'api_key' => $nvidiaKey,
                 'endpoint' => (string) config('services.nvidia.chat_endpoint'),
-                'model' => $wantsVision
-                    ? (string) config('services.nvidia.vision_model')
-                    : (string) config('services.nvidia.text_model'),
+                'model' => $primary,
+                'models' => array_values(array_unique($fallbackModels)),
             ];
         }
 
         return $providers;
+    }
+
+    /**
+     * Remap retired/deprecated model slugs that may still exist in production .env files.
+     */
+    private function normalizeModel(string $provider, string $model, bool $wantsVision): string
+    {
+        $trimmed = trim($model);
+
+        if ($provider === 'gemini') {
+            $retiredGemini = [
+                '',
+                'gemini-2.0-flash',
+                'gemini-2.0-flash-exp',
+                'gemini-2.0-flash-lite',
+                'gemini-1.5-flash',
+                'gemini-1.5-flash-latest',
+                'gemini-1.5-pro',
+            ];
+            if (in_array(strtolower($trimmed), $retiredGemini, true)) {
+                return 'gemini-2.5-flash';
+            }
+
+            return $trimmed;
+        }
+
+        if ($provider === 'groq') {
+            $retiredGroq = [
+                '',
+                'qwen/qwen3.6-27b',
+                'llama3-70b-8192',
+                'llama3-8b-8192',
+            ];
+            if (in_array(strtolower($trimmed), $retiredGroq, true)) {
+                return $wantsVision
+                    ? 'meta-llama/llama-4-scout-17b-16e-instruct'
+                    : 'llama-3.3-70b-versatile';
+            }
+
+            return $trimmed;
+        }
+
+        if ($provider === 'nvidia') {
+            $retiredNvidia = [
+                '',
+                'meta/llama-3.3-70b-instruct',
+            ];
+            if (in_array(strtolower($trimmed), $retiredNvidia, true)) {
+                return $wantsVision
+                    ? 'meta/llama-3.2-11b-vision-instruct'
+                    : 'meta/llama-3.1-70b-instruct';
+            }
+
+            return $trimmed;
+        }
+
+        return $trimmed;
     }
 
     /**
@@ -105,12 +196,14 @@ class LlmChatClient
     private function requestGemini(array $provider, array $messages, array $options): string
     {
         $timeout = (int) ($options['timeout'] ?? 90);
+        $requestedMaxTokens = (int) ($options['max_tokens'] ?? 2048);
         [$system, $contents] = $this->toGeminiContents($messages);
         $payload = [
             'contents' => $contents,
             'generationConfig' => [
                 'temperature' => (float) ($options['temperature'] ?? 0.5),
-                'maxOutputTokens' => (int) ($options['max_tokens'] ?? 2048),
+                // Ensure sufficient output budget for Gemini 2.5 thinking + visible reply.
+                'maxOutputTokens' => max(2048, $requestedMaxTokens),
             ],
         ];
         if ($system !== '') {
@@ -268,8 +361,17 @@ class LlmChatClient
             }
 
             if ($parts !== []) {
-                $contents[] = ['role' => $geminiRole, 'parts' => $parts];
+                $lastIndex = count($contents) - 1;
+                if ($lastIndex >= 0 && $contents[$lastIndex]['role'] === $geminiRole) {
+                    $contents[$lastIndex]['parts'] = array_merge($contents[$lastIndex]['parts'], $parts);
+                } else {
+                    $contents[] = ['role' => $geminiRole, 'parts' => $parts];
+                }
             }
+        }
+
+        while ($contents !== [] && $contents[0]['role'] !== 'user') {
+            array_shift($contents);
         }
 
         if ($contents === []) {

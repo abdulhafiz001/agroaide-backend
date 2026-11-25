@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\Log;
 
 class AiAdvisorService
 {
+    private const UNAVAILABLE_FALLBACK_TEXT = 'I\'m temporarily unavailable. Please try again shortly.';
+
     public function __construct(
         private WeatherService $weatherService,
         private LlmChatClient $llm,
@@ -42,7 +44,23 @@ class AiAdvisorService
             'message' => $message,
         ]);
 
+        // Deterministic pre-check so obvious general-chatbot / non-farm questions
+        // are always refused and redirected back to the user's farm.
+        if ($this->isOffTopicQuestion($message, $user)) {
+            $reply = $this->buildOffTopicRefusal($user, $lang);
+
+            AdvisorConversation::create([
+                'user_id' => $user->id,
+                'role' => 'assistant',
+                'message' => $reply,
+            ]);
+
+            return $reply;
+        }
+
         $langName = TranslationService::languageName($lang);
+        $farmName = $user->farm_name ?? 'your farm';
+        $crops = is_array($user->crops) && $user->crops !== [] ? implode(', ', $user->crops) : 'your crops';
         $systemPrompt = $this->buildSystemPrompt($user, $lang);
         // Includes the user message just saved — do not append it again.
         $conversationHistory = $this->getRecentConversation($user, 24);
@@ -58,13 +76,19 @@ class AiAdvisorService
             ];
         }
 
-        // Hard override after history so older messages cannot keep the previous language.
+        // Hard override after history so older messages cannot keep the previous language
+        // and the model strictly refuses off-topic non-farm queries.
         $messages[] = [
             'role' => 'user',
-            'content' => "SYSTEM REMINDER: Reply to my last farming question entirely in {$langName}. Do not use any other language. Do not show thinking.",
+            'content' => "SYSTEM REMINDER: Only answer if my last message is related to my farm (\"{$farmName}\"), my crops ({$crops}), soil, weather, crop scans, farm calendar tasks, or agriculture. If my question is unrelated to farming or my farm, DO NOT answer it—instead politely state in 1-2 short sentences that you are my AgroAide Farm Advisor for \"{$farmName}\" and only answer questions about my farm and crops. Reply entirely in {$langName}. Do not use any other language. Do not show thinking.",
         ];
 
-        $reply = app(LlmResponseCleaner::class)->clean($this->askLlm($messages));
+        $rawReply = $this->askLlm($messages);
+        $reply = app(LlmResponseCleaner::class)->clean($rawReply);
+
+        if ($reply === '' || $this->isUnavailablePlaceholder($reply)) {
+            $reply = $this->buildContextualFallbackReply($user, $message, $lang);
+        }
 
         AdvisorConversation::create([
             'user_id' => $user->id,
@@ -84,6 +108,7 @@ class AiAdvisorService
             ->orderBy('created_at', 'desc')
             ->limit($limit)
             ->get()
+            ->reject(fn (AdvisorConversation $msg) => $msg->role === 'assistant' && $this->isUnavailablePlaceholder($msg->message))
             ->reverse()
             ->values()
             ->map(fn (AdvisorConversation $msg) => [
@@ -421,10 +446,11 @@ FARM PROFILE:
 {$scansBlock}
 
 CRITICAL RULES:
+0. STRICT FARM-ONLY SCOPE (NON-NEGOTIABLE): You are EXCLUSIVELY the farm advisor for {$name}'s farm ("{$farmName}"). You are NOT a general-purpose chatbot. ONLY answer questions related to {$name}'s farm, their crops ({$crops}), fields, soil, irrigation, local weather forecast, crop scans/health, pests/diseases, farm calendar tasks, market prices, or agricultural practices relevant to their farm. If the user asks about ANYTHING unrelated to farming or their farm (for example: politics, sports, programming/code, math homework, history, geography, celebrities, movies/music, cooking recipes, or general trivia), DO NOT answer the off-topic question—not even briefly. Instead, politely reply in 1-2 short sentences that you are their AgroAide Farm Advisor for "{$farmName}" and can only answer questions about their farm, crops ({$crops}), weather, soil, and farm activities.
 1. You already have live farm + weather + crop-scan data above. USE IT. When asked about rain, temperature, soil, tasks, fields, or a recent scan, answer from this context first.
 2. Never say you lack access to weather, location, farm details, or scan results if that data appears above.
 3. If weather coordinates are missing, say the farmer should set farm location in Settings — do not invent forecasts.
-4. Give practical, actionable advice specific to this farmer's crops, soil, irrigation, tasks, and local conditions.
+4. Give practical, actionable advice specific to this farmer's crops, soil, irrigation, tasks, and local conditions. Even when the farmer asks a general farming question, anchor your answer to "{$farmName}" in {$location}, their crops ({$crops}), soil ({$soilType}), and live forecast.
 5. Use simple language for a {$experience}-level farmer.
 6. Keep chat replies concise (about 2-4 short paragraphs). Prefer clear bullets when listing tasks or weather days.
 7. Reference this farmer by name or farm when it feels natural — you are their farm companion, not a generic chatbot.
@@ -653,6 +679,7 @@ PROMPT;
             ->orderBy('created_at', 'desc')
             ->limit($limit)
             ->get()
+            ->reject(fn (AdvisorConversation $msg) => $msg->role === 'assistant' && $this->isUnavailablePlaceholder($msg->message))
             ->reverse()
             ->values();
     }
@@ -672,7 +699,177 @@ PROMPT;
         } catch (\Throwable $e) {
             Log::error('AI advisor request failed', ['error' => $e->getMessage()]);
 
-            return 'I\'m temporarily unavailable. Please try again shortly.';
+            return self::UNAVAILABLE_FALLBACK_TEXT;
         }
+    }
+
+    private function isUnavailablePlaceholder(string $text): bool
+    {
+        $normalized = strtolower(trim($text));
+
+        return $normalized === strtolower(self::UNAVAILABLE_FALLBACK_TEXT)
+            || str_starts_with($normalized, "i'm temporarily unavailable")
+            || str_starts_with($normalized, 'im temporarily unavailable');
+    }
+
+    /**
+     * Detect clearly non-agricultural / general-chatbot queries so the advisor
+     * stays strictly scoped to the user's farm.
+     */
+    private function isOffTopicQuestion(string $message, User $user): bool
+    {
+        $lower = strtolower(trim($message));
+        if ($lower === '') {
+            return false;
+        }
+
+        // Dynamic crop/farm terms from the user's profile and fields.
+        $userTerms = [];
+        if (is_string($user->farm_name) && trim($user->farm_name) !== '') {
+            $userTerms[] = strtolower(trim($user->farm_name));
+        }
+        if (is_array($user->crops)) {
+            foreach ($user->crops as $crop) {
+                if (is_string($crop) && trim($crop) !== '') {
+                    $userTerms[] = strtolower(trim($crop));
+                }
+            }
+        }
+        foreach (FarmField::where('user_id', $user->id)->pluck('crop_type')->all() as $fieldCrop) {
+            if (is_string($fieldCrop) && trim($fieldCrop) !== '') {
+                $userTerms[] = strtolower(trim($fieldCrop));
+            }
+        }
+
+        foreach ($userTerms as $term) {
+            if ($term !== '' && str_contains($lower, $term)) {
+                return false;
+            }
+        }
+
+        // Agricultural, weather, soil, pest, and AgroAide domain keywords (English + Hausa/Yoruba/Pidgin common terms).
+        $farmPattern = '/\b(farm|farmer|farming|field|fields|plot|plots|crop|crops|plant|plants|planting|seed|seeds|seedling|harvest|harvesting|weed|weeding|weeds|soil|loam|clay|sandy|fertiliz|npk|urea|compost|manure|mulch|irrigat|water|watering|moisture|drainage|weather|rain|raining|rainfall|forecast|temperature|humidity|wind|drought|harmattan|season|dry season|wet season|spray|spraying|pest|pests|disease|diseases|blight|rust|mosaic|rot|wilting|wilt|yellow|brown|spot|spots|leaf|leaves|stem|root|roots|insect|worm|armyworm|aphid|fungus|fungicide|pesticide|herbicide|neem|scan|scans|diagnos|outbreak|task|tasks|calendar|schedule|journal|yield|storage|market|price|prices|agro|agroaide|agronom|maize|corn|cassava|rice|yam|tomato|tomatoes|pepper|cowpea|beans|groundnut|peanut|plantain|banana|sorghum|millet|cocoa|palm|okro|okra|onion|garlic|ginger|potato|vegetable|livestock|poultry|cattle|goat|sheep|fish|acre|hectare|gona|shuka|amfani|ruwa|sama|kasa|masara|rogo|shinkafa|doya|oko|ogbin|agbado|egusi|eroja|ojo)\b/i';
+
+        if (preg_match($farmPattern, $lower) === 1) {
+            return false;
+        }
+
+        // Obvious non-farm / general-chatbot topics (coding, politics, sports, entertainment, homework, trivia, etc.).
+        $offTopicPatterns = [
+            '/\b(python|javascript|typescript|java|c\+\+|html|css|php|sql|react|flutter|laravel|coding|programmer|programming|algorithm|leetcode|source code|write (?:a |me )?code|build (?:a |me )?(?:website|app))\b/i',
+            '/\b(president|prime minister|governor|senator|election|politician|political party|parliament|constitution|world war|independence day)\b/i',
+            '/\b(football|soccer|premier league|champions league|world cup|la liga|arsenal|chelsea|manchester|liverpool|barcelona|real madrid|messi|ronaldo|basketball|nba|tennis|olympics|betting|sportybet|bet9ja)\b/i',
+            '/\b(movie|movies|netflix|cinema|actor|actress|celebrity|musician|burna boy|davido|wizkid|taylor swift|drake|grammy|song lyrics)\b/i',
+            '/\b(bitcoin|ethereum|cryptocurrency|crypto|forex trading|stock market|nft|blockchain)\b/i',
+            '/\b(tell me a joke|write (?:a |me a )?(?:poem|story|essay|song|rap|letter|cv|resume)|homework|assignment|quadratic|calculus|trigonometry|solve this equation)\b/i',
+            '/\b(capital of|who invented|who discovered|who is the richest|who is the tallest|planet|solar system|galaxy|dinosaurs)\b/i',
+            '/\b(how to cook|recipe for|jollof rice recipe|bake a cake|girlfriend|boyfriend|dating advice|relationship advice|horoscope|zodiac)\b/i',
+            '/^\s*what is \d+\s*[\+\-\*\/x]\s*\d+/i',
+        ];
+
+        foreach ($offTopicPatterns as $pattern) {
+            if (preg_match($pattern, $lower) === 1) {
+                return true;
+            }
+        }
+
+        // Generic encyclopedia / trivia openers that do not mention anything farm-related.
+        if (preg_match('/^\s*(who is|who was|what is the capital|where is the country|when was .+ born|explain quantum|define democracy|write an essay)\b/i', $lower) === 1) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function buildOffTopicRefusal(User $user, string $lang = 'en'): string
+    {
+        $farmName = is_string($user->farm_name) && trim($user->farm_name) !== ''
+            ? trim($user->farm_name)
+            : 'your farm';
+        $crops = is_array($user->crops) && $user->crops !== []
+            ? implode(', ', $user->crops)
+            : 'your crops';
+
+        return match ($lang) {
+            'ha' => "Ni mai ba da shawara na AgroAide ne don gonar ku ({$farmName}) kawai. Ina amsa tambayoyi ne kawai game da gonar ku, amfanin gona ({$crops}), yanayi, kasa, da ayyukan gona—don Allah ku tambaye ni wani abu game da gonar ku!",
+            'yo' => "Olùdámọ̀ràn AgroAide fún oko rẹ ({$farmName}) nìkan ni mí. Èmi kì í dáhùn ibeere tí kò bá ní í ṣe pẹ̀lú oko rẹ, irúgbìn rẹ ({$crops}), ojú-ọjọ́, ilẹ̀, tàbí iṣẹ́ oko rẹ—jọ̀wọ́ béèrè ohun kan nípa oko rẹ!",
+            'pcm' => "I be your AgroAide Farm Advisor for {$farmName} only. I dey only answer questions wey concern your farm, your crops ({$crops}), weather, soil, crop scans, and farm work—abeg ask me question about your farm!",
+            default => "I'm your AgroAide Farm Advisor for {$farmName}, so I only answer questions related to your farm, your crops ({$crops}), local weather, soil health, crop scans, and farm tasks. Please ask me a question about your farm or fields!",
+        };
+    }
+
+    /**
+     * Build a personalized farm-grounded reply directly from the farmer's live
+     * profile, weather, fields, tasks, and scans when external LLM APIs are unreachable.
+     */
+    private function buildContextualFallbackReply(User $user, string $message, string $lang = 'en'): string
+    {
+        if ($this->isOffTopicQuestion($message, $user)) {
+            return $this->buildOffTopicRefusal($user, $lang);
+        }
+
+        $name = $user->name ?? 'Farmer';
+        $farmName = $user->farm_name ?? 'your farm';
+        $location = $user->farm_location ?? 'Nigeria';
+        $crops = is_array($user->crops) && $user->crops !== [] ? implode(', ', $user->crops) : 'your crops';
+        $soilType = $user->soil_type ?? 'loamy';
+        $irrigation = $user->irrigation_access ?? 'rain-fed';
+        $pulse = $this->buildTodayFarmPulse($user);
+
+        $pendingTasks = CalendarTask::where('user_id', $user->id)
+            ->where('completed', false)
+            ->orderBy('due_date')
+            ->limit(3)
+            ->get();
+
+        $latestScan = FarmImageAnalysis::where('user_id', $user->id)
+            ->where(function ($q) {
+                $q->whereNull('processing_state')->orWhere('processing_state', 'completed');
+            })
+            ->latest()
+            ->first();
+
+        $fields = FarmField::where('user_id', $user->id)->limit(4)->get();
+        $lower = strtolower($message);
+
+        $weatherSentence = $pulse['rainToday'] || $pulse['rainTonight']
+            ? "For {$farmName} in {$location}, rain chance is around {$pulse['todayRainChance']}% today ({$pulse['tonightMaxChance']}% tonight), so hold off on foliar spraying or fertilizer application until after the rain passes and check field drainage."
+            : "For {$farmName} in {$location}, rain chance is low today (~{$pulse['todayRainChance']}%), giving you a good dry window for weeding, scouting {$crops}, or early-morning watering.";
+
+        if (preg_match('/\b(scan|disease|blight|rust|mosaic|spot|yellow|wilt|leaf|leaves|pest)\b/i', $lower) === 1 && $latestScan) {
+            $res = is_array($latestScan->result_json) ? $latestScan->result_json : [];
+            $scanCrop = $res['crop'] ?? $crops;
+            $condLabel = $res['conditionLabel'] ?? $latestScan->condition ?? 'assessed';
+            $diseaseName = $res['disease']['name'] ?? null;
+            $scanSummary = $res['summary'] ?? '';
+
+            $scanDetail = $diseaseName
+                ? "Your latest crop scan on {$scanCrop} was marked {$condLabel} ({$diseaseName}). {$scanSummary}"
+                : "Your latest crop scan on {$scanCrop} was marked {$condLabel} with no major disease flagged. {$scanSummary}";
+
+            return trim("{$scanDetail}\n\n{$weatherSentence}");
+        }
+
+        $taskLine = '';
+        if ($pendingTasks->isNotEmpty()) {
+            $taskTitles = $pendingTasks
+                ->map(fn ($t) => "{$t->title} (due ".optional($t->due_date)?->toDateString().')')
+                ->implode(', ');
+            $taskLine = "Your upcoming scheduled farm tasks are: {$taskTitles}.";
+        } else {
+            $taskLine = "You have no overdue calendar tasks right now, so focus on routine field scouting for your {$crops} plots.";
+        }
+
+        $fieldLine = '';
+        if ($fields->isNotEmpty()) {
+            $fieldSummary = $fields
+                ->map(fn ($f) => "{$f->name} ({$f->crop_type}, status: {$f->status})")
+                ->implode('; ');
+            $fieldLine = "Active fields on {$farmName}: {$fieldSummary}.";
+        } else {
+            $fieldLine = "On {$farmName}, you are managing {$crops} on {$soilType} soil ({$irrigation} irrigation).";
+        }
+
+        return trim("Hello {$name}! {$weatherSentence}\n\n{$fieldLine} {$taskLine}");
     }
 }

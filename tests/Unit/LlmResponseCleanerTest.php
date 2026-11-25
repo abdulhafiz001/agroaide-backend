@@ -63,4 +63,15 @@ TEXT;
         $this->assertStringNotContainsString('—', $cleaned);
         $this->assertSame('Best days to harvest this crop - not a single-day deadline.', $cleaned);
     }
+
+    public function test_preserves_farmer_facing_markdown_bullets_and_paragraphs(): void
+    {
+        $cleaner = new LlmResponseCleaner;
+        $raw = "Your maize on Green Valley Farm looks healthy today.\n\n- **Morning:** Check soil moisture before watering.\n- **Afternoon:** Delay spraying if rain builds up.";
+        $cleaned = $cleaner->clean($raw);
+
+        $this->assertStringContainsString('- **Morning:** Check soil moisture before watering.', $cleaned);
+        $this->assertStringContainsString('- **Afternoon:** Delay spraying if rain builds up.', $cleaned);
+        $this->assertStringContainsString("\n\n", $cleaned);
+    }
 }
